@@ -5,10 +5,12 @@ Este proyecto cruza los targets visibles de MOP con la cobertura de un Data Prev
 ## Archivos del proyecto
 
 - `mop_lsst.ipynb`: punto de entrada; se ejecuta en orden.
-- `target_selection_pipeline.py`: consultas, caché, tablas, mapas y reportes.
+- `target_selection_pipeline.py`: orquestación, consultas, caché, tablas y mapas.
+- `photometry.py`: descarga, caché y preparación de fotometría MOP.
+- `target_report.py`: dashboard gráfico de cada target.
 - `data_release_config.py`: configuración de DP0.1, DP0.2, DP1 y DP2.
 
-Los tres archivos deben permanecer en la misma carpeta.
+El notebook sólo configura las conexiones, llama a las funciones instaladas y muestra sus productos.
 
 ## Requisitos
 

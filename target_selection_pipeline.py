@@ -17,12 +17,13 @@ from typing import Callable
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from tqdm.std import tqdm
 
 from data_release_config import DataReleaseConfig, get_data_release
 
 
 CACHE_VERSION = 3
-TARGET_REPORT_VERSION = 4
+TARGET_REPORT_VERSION = 5
 
 
 def _safe_name(value: object) -> str:
@@ -224,7 +225,7 @@ def save_target_summary(
     ]
     width_units = np.asarray(text_lengths, dtype=float)
     column_widths = (width_units / width_units.sum()).tolist()
-    fig_width = max(16, min(28, width_units.sum() * .115))
+    fig_width = max(8.5, min(20, width_units.sum() * .068))
     fig_height = max(5, 1.25 + .285 * (len(display) + 1))
     fig = plt.figure(figsize=(fig_width, fig_height))
     ax = fig.add_axes([.015, .015, .97, .885])
@@ -254,73 +255,156 @@ def save_target_summary(
     return result
 
 
-# Backward-compatible aliases; prefer the release-neutral public names above.
-query_dp2_coverage = query_release_coverage
-summarize_dp2_coverage = summarize_release_coverage
-
-
-def plot_sky_metric(
+def plot_sky_dual_metric(
     targets: pd.DataFrame,
-    metric: str,
+    left_metric: str,
+    right_metric: str,
     output_path: str | Path,
     title: str | None = None,
+    left_label: str | None = None,
+    right_label: str | None = None,
     projection: str = "galactic",
     show_regions: bool = True,
+    bulge_zoom: tuple[float, float] | None = None,
 ) -> None:
-    """Plot targets on a sky projection, with a separate reference panel.
-
-    The default Galactic Mollweide projection makes the Galactic plane and
-    bulge easy to identify. ``projection="equatorial"`` keeps RA/Dec instead.
-    """
+    """Plot two metrics as the left and right halves of each target marker."""
     from astropy.coordinates import SkyCoord
     import astropy.units as u
+    from matplotlib.path import Path as MarkerPath
+    from matplotlib.colors import Normalize
 
     data = targets.dropna(subset=["RA_deg", "Dec_deg"]).reset_index(drop=True)
-    values = pd.to_numeric(data[metric], errors="coerce").fillna(0)
+    data["_reference_number"] = np.arange(1, len(data) + 1)
+    left_values = pd.to_numeric(data[left_metric], errors="coerce")
+    right_values = pd.to_numeric(data[right_metric], errors="coerce").fillna(0)
+    left_scale_array = left_values.to_numpy(dtype=float)
+    right_scale_array = right_values.to_numpy(dtype=float)
 
     coords = SkyCoord(data["RA_deg"].to_numpy() * u.deg, data["Dec_deg"].to_numpy() * u.deg, frame="icrs")
     use_galactic = projection.casefold() == "galactic"
     if use_galactic:
         galactic = coords.galactic
-        longitude = galactic.l.wrap_at(180 * u.deg).radian
-        latitude = galactic.b.radian
-        xlabel, ylabel = "Galactic longitude l", "Galactic latitude b"
+        wrapped_longitude = galactic.l.wrap_at(180 * u.deg)
+        if bulge_zoom is not None:
+            lon_limit, lat_limit = bulge_zoom
+            longitude_all = wrapped_longitude.degree
+            latitude_all = galactic.b.degree
+            inside = (np.abs(longitude_all) <= lon_limit) & (np.abs(latitude_all) <= lat_limit)
+            data = data.loc[inside].reset_index(drop=True)
+            left_values = left_values.loc[inside].reset_index(drop=True)
+            right_values = right_values.loc[inside].reset_index(drop=True)
+            longitude = np.asarray(longitude_all)[inside]
+            latitude = np.asarray(latitude_all)[inside]
+            xlabel, ylabel = "Galactic longitude l [deg]", "Galactic latitude b [deg]"
+        else:
+            longitude = wrapped_longitude.radian
+            latitude = galactic.b.radian
+            xlabel, ylabel = "Galactic longitude l", "Galactic latitude b"
     else:
         longitude = coords.ra.wrap_at(180 * u.deg).radian
         latitude = coords.dec.radian
         xlabel, ylabel = "RA", "Dec"
 
-    fig = plt.figure(figsize=(16, 9), constrained_layout=True)
-    grid = fig.add_gridspec(1, 2, width_ratios=[3.5, 1.7], wspace=0.22)
-    ax = fig.add_subplot(grid[0], projection="mollweide")
-    side = grid[1].subgridspec(2, 1, height_ratios=[1, 5], hspace=0.25)
-    colorbar_ax = fig.add_subplot(side[0])
-    legend_ax = fig.add_subplot(side[1])
+    def semicircle_marker(side: str) -> MarkerPath:
+        start, stop = ((np.pi / 2, 3 * np.pi / 2) if side == "left" else (-np.pi / 2, np.pi / 2))
+        angles = np.linspace(start, stop, 32)
+        arc = np.column_stack([np.cos(angles), np.sin(angles)])
+        vertices = np.vstack([[0, 0], arc, [0, 0]])
+        codes = [MarkerPath.MOVETO] + [MarkerPath.LINETO] * len(arc) + [MarkerPath.CLOSEPOLY]
+        return MarkerPath(vertices, codes)
+
+    fig = plt.figure(figsize=(15, 6.7))
+    map_projection = None if bulge_zoom is not None else "mollweide"
+    ax = fig.add_axes([.025, .045, .69, .74], projection=map_projection)
+    left_colorbar_ax = fig.add_axes([.07, .865, .285, .022])
+    right_colorbar_ax = fig.add_axes([.385, .865, .285, .022])
+    legend_ax = fig.add_axes([.72, .035, .275, .86])
     legend_ax.axis("off")
+    fig.text(.37, .975, title or "MOP + Rubin targets", ha="center", va="top", fontsize=12)
 
     if use_galactic and show_regions:
-        ax.axhspan(np.deg2rad(-8), np.deg2rad(8), color="gold", alpha=0.10, zorder=0)
-        ax.scatter([0], [0], marker="x", color="darkorange", s=80, linewidths=1.5, zorder=2)
+        plane_limit = 8 if bulge_zoom is not None else np.deg2rad(8)
+        ax.axhspan(-plane_limit, plane_limit, color="gold", alpha=0.10, zorder=0)
+        ax.scatter([0], [0], marker="x", color="darkorange", s=70, linewidths=1.3, zorder=2)
         ax.text(0.02, 0.08, "Bulbo", transform=ax.transAxes, color="darkorange", fontsize=9)
-        # Approximate Galactic coordinates of the Magellanic Clouds.
-        for lon, lat, label in [(280, -33, "LMC"), (303, -44, "SMC")]:
-            x = np.deg2rad(((lon + 180) % 360) - 180)
-            y = np.deg2rad(lat)
-            ax.scatter([x], [y], marker="s", facecolors="none", edgecolors="deepskyblue", s=70, zorder=2)
-            ax.text(x, y, f"  {label}", color="deepskyblue", fontsize=8, va="center")
+        if bulge_zoom is None:
+            for lon, lat, label in [(280, -33, "LMC"), (303, -44, "SMC")]:
+                x = np.deg2rad(((lon + 180) % 360) - 180)
+                y = np.deg2rad(lat)
+                ax.scatter([x], [y], marker="s", facecolors="none", edgecolors="deepskyblue", s=60, zorder=2)
+                ax.text(x, y, f"  {label}", color="deepskyblue", fontsize=8, va="center")
 
-    scatter = ax.scatter(longitude, latitude, c=values, cmap="viridis", s=45, edgecolor="black", linewidth=.3, zorder=3)
+    marker_size = 42
+    left_array = left_values.to_numpy(dtype=float)
+    right_array = right_values.to_numpy(dtype=float)
+    left_cmap = plt.get_cmap("viridis").copy()
+    right_cmap = plt.get_cmap("plasma").copy()
+
+    def positive_norm(values):
+        positive = values[np.isfinite(values) & (values > 0)]
+        if positive.size == 0:
+            return Normalize(vmin=0.5, vmax=1.0)
+        vmin, vmax = float(positive.min()), float(positive.max())
+        if np.isclose(vmin, vmax):
+            delta = max(abs(vmin) * .01, .01)
+            vmin, vmax = vmin - delta, vmax + delta
+        return Normalize(vmin=vmin, vmax=vmax)
+
+    left_norm = positive_norm(left_scale_array)
+    right_norm = positive_norm(right_scale_array)
+    left_marker = semicircle_marker("left")
+    right_marker = semicircle_marker("right")
+
+    both_zero = (
+        np.isfinite(left_array) & np.isfinite(right_array)
+        & (left_array == 0) & (right_array == 0)
+    )
+
+    def draw_half(values, marker, cmap, norm):
+        positive = np.isfinite(values) & (values > 0) & ~both_zero
+        zero = np.isfinite(values) & (values == 0) & ~both_zero
+        missing = ~np.isfinite(values) & ~both_zero
+        ax.scatter(longitude[positive], latitude[positive], c=values[positive], cmap=cmap, norm=norm,
+                   marker=marker, s=marker_size, edgecolor="none", zorder=3)
+        ax.scatter(longitude[zero], latitude[zero], color="black", marker=marker,
+                   s=marker_size, edgecolor="none", zorder=3)
+        ax.scatter(longitude[missing], latitude[missing], color="lightgray", marker=marker,
+                   s=marker_size, edgecolor="none", zorder=3)
+
+    draw_half(left_array, left_marker, left_cmap, left_norm)
+    draw_half(right_array, right_marker, right_cmap, right_norm)
+    left_mappable = plt.cm.ScalarMappable(norm=left_norm, cmap=left_cmap)
+    right_mappable = plt.cm.ScalarMappable(norm=right_norm, cmap=right_cmap)
+    regular = ~both_zero
+    ax.scatter(longitude[regular], latitude[regular], s=marker_size, facecolors="none",
+               edgecolors="black", linewidths=.35, zorder=3.2)
+    ax.scatter(longitude[both_zero], latitude[both_zero], s=8, color="black",
+               edgecolors="none", zorder=3.2)
+
     for number, row in data.iterrows():
-        ax.annotate(str(number + 1), (longitude[number], latitude[number]), xytext=(3, 3), textcoords="offset points", fontsize=7, zorder=4)
+        ax.annotate(str(row["_reference_number"]), (longitude[number], latitude[number]),
+                    xytext=(4, 4), textcoords="offset points",
+                    fontsize=8 if bulge_zoom is not None else 7, zorder=4)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    ax.set_title(title or f"Targets colored by {metric}")
+    if bulge_zoom is not None:
+        ax.set_xlim(-bulge_zoom[0], bulge_zoom[0])
+        ax.set_ylim(-bulge_zoom[1], bulge_zoom[1])
+        ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.35)
-    fig.colorbar(scatter, cax=colorbar_ax, label=metric, orientation="horizontal")
-    legend = "\n".join(f"{i + 1}: {name}" for i, name in enumerate(data["Target"]))
+
+    fig.colorbar(left_mappable, cax=left_colorbar_ax, orientation="horizontal")
+    fig.colorbar(right_mappable, cax=right_colorbar_ax, orientation="horizontal")
+    left_colorbar_ax.set_title(f"Mitad izquierda: {left_label or left_metric}", fontsize=8, pad=3)
+    right_colorbar_ax.set_title(f"Mitad derecha: {right_label or right_metric}", fontsize=8, pad=3)
+    left_colorbar_ax.tick_params(labelsize=7, pad=1)
+    right_colorbar_ax.tick_params(labelsize=7, pad=1)
+    fig.text(.37, .815, "Mitad negra = 0  |  Punto negro pequeño = ambos 0  |  Gris = sin dato", ha="center", va="center", fontsize=7)
+
+    references = "\n".join(f"{int(row['_reference_number'])}: {row['Target']}" for _, row in data.iterrows())
     legend_ax.text(0, 1, "Referencias", va="top", fontsize=10, weight="bold")
-    legend_ax.text(0, 0.95, legend, va="top", fontsize=7, family="monospace", linespacing=1.25)
-    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    legend_ax.text(0, .955, references, va="top", fontsize=7, family="monospace", linespacing=1.18)
+    fig.savefig(output_path, dpi=180, bbox_inches="tight", pad_inches=.04)
     plt.close(fig)
 
 
@@ -328,33 +412,6 @@ def _write_report_versions(path: Path, versions: dict[str, int]) -> None:
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(versions, indent=2, sort_keys=True), encoding="utf-8")
     temporary.replace(path)
-
-
-def _migrate_target_report(output_dir: Path, target_name: str, report_path: Path) -> int | None:
-    """Move the newest legacy per-target report into the flat layout."""
-    candidates = sorted(
-        output_dir.glob(f"*_{_safe_name(target_name)}/target_report.png"),
-        key=lambda path: path.stat().st_mtime, reverse=True,
-    )
-    if not candidates:
-        return None
-    source = candidates[0]
-    version_path = source.parent / ".report_version"
-    try:
-        version = int(version_path.read_text().strip())
-    except (OSError, ValueError):
-        version = 0
-    source.replace(report_path)
-    for candidate in candidates:
-        if candidate.exists():
-            candidate.unlink()
-        legacy_version = candidate.parent / ".report_version"
-        legacy_version.unlink(missing_ok=True)
-        try:
-            candidate.parent.rmdir()
-        except OSError:
-            pass
-    return version
 
 
 def save_target_reports(
@@ -378,26 +435,31 @@ def save_target_reports(
     empty_coverage = coverage_rows.iloc[0:0].copy()
     total = len(targets)
     plot_errors = []
-    generated = skipped = no_coadd = migrated = 0
-    for number, (_, row) in enumerate(targets.iterrows(), start=1):
+    generated = skipped = no_coadd = 0
+    if verbose:
+        print(
+            "Referencias — reutilizados: PNG vigente; generados: PNG nuevo; "
+            "sin coadd: no genera PNG; errores: fallos aislados.",
+            flush=True,
+        )
+    progress = tqdm(
+        targets.iterrows(), total=total, desc="Reportes", unit="target",
+        disable=not verbose, dynamic_ncols=True, mininterval=1.0,
+    )
+
+    def update_progress() -> None:
+        progress.set_postfix(
+            reutilizados=skipped, generados=generated, sin_coadd=no_coadd, errores=len(plot_errors), refresh=False,
+        )
+
+    for _, row in progress:
         target_name = str(row["Target"])
         file_key = _safe_name(target_name)
         report_path = output_dir / f"{file_key}_target_report.png"
-        if not report_path.exists():
-            legacy_version = _migrate_target_report(output_dir, target_name, report_path)
-            if legacy_version is not None:
-                versions[file_key] = legacy_version
-                migrated += 1
-                _write_report_versions(versions_path, versions)
-        if verbose and (number == 1 or number % 10 == 0 or number == total):
-            print(
-                f"    targets revisados: {number}/{total} | generados={generated}, "
-                f"migrados={migrated}, cache={skipped}, sin coadd={no_coadd}, errores={len(plot_errors)}",
-                flush=True,
-            )
         current_version = str(versions.get(file_key, ""))
         if report_path.exists() and current_version == str(TARGET_REPORT_VERSION) and not overwrite:
             skipped += 1
+            update_progress()
             continue
         target_coverage = grouped.get(row["Target"], empty_coverage)
         try:
@@ -417,16 +479,19 @@ def save_target_reports(
             report_path.unlink(missing_ok=True)
             versions.pop(file_key, None)
             _write_report_versions(versions_path, versions)
+            update_progress()
             continue
         figure.savefig(report_path, dpi=180, bbox_inches="tight")
         plt.close(figure)
         versions[file_key] = TARGET_REPORT_VERSION
         _write_report_versions(versions_path, versions)
         generated += 1
+        update_progress()
+    progress.close()
     if verbose:
-        print(
-            f"    reportes terminados: generados={generated}, migrados={migrated}, "
-            f"cache={skipped}, sin coadd={no_coadd}, errores={len(plot_errors)}", flush=True,
+        tqdm.write(
+            f"Reportes terminados: generados={generated}, "
+            f"reutilizados={skipped}, sin coadd={no_coadd}, errores={len(plot_errors)}"
         )
     pd.DataFrame(plot_errors, columns=["Target", "error"]).to_csv(
         output_dir.parent / "plot_errors.csv", index=False
@@ -454,7 +519,6 @@ def run_pipeline(
     daily_path = paths["tables"] / "visible_targets_daily.csv"
     summary_path = paths["tables"] / "visible_summary.csv"
     coverage_path = paths["tables"] / "coverage_raw.csv"
-    legacy_dp2_path = paths["tables"] / "dp2_coverage_raw.csv"
     manifest_path = paths["run"] / "manifest.json"
     started = perf_counter()
     cache_valid = False
@@ -495,10 +559,6 @@ def run_pipeline(
         print(f"[3/5] Cobertura {release.name}" + (" (cache)" if cache_valid else f" ({max_workers} workers)"), flush=True)
     if cache_valid and coverage_path.exists():
         coverage_rows = pd.read_csv(coverage_path)
-    elif cache_valid and release.name == "DP2" and legacy_dp2_path.exists():
-        # Migrate the previous DP2-specific cache without repeating TAP queries.
-        coverage_rows = pd.read_csv(legacy_dp2_path)
-        coverage_rows.to_csv(coverage_path, index=False)
     else:
         coverage_rows = query_release_coverage(
             summary, tap_service, max_workers=max_workers, data_release=release
@@ -518,10 +578,20 @@ def run_pipeline(
         release_name=release.name,
     )
 
-    if "coverage_n_visits" in combined:
-        plot_sky_metric(combined, "coverage_n_visits", paths["sky_plots"] / "sky_by_coverage_visits.png", f"Targets colored by {release.name} visits")
-    if "mag_now" in combined:
-        plot_sky_metric(combined, "mag_now", paths["sky_plots"] / "sky_by_mag_now.png", "Targets colored by MOP mag_now")
+    if {"coverage_n_visits", "mag_now"}.issubset(combined.columns):
+        plot_sky_dual_metric(
+            combined, "mag_now", "coverage_n_visits",
+            paths["sky_plots"] / "sky_by_mag_and_visits.png",
+            title=f"Targets MOP con cobertura {release.name}",
+            left_label="MOP mag_now", right_label=f"{release.name} visits",
+        )
+        plot_sky_dual_metric(
+            combined, "mag_now", "coverage_n_visits",
+            paths["sky_plots"] / "sky_bulge_zoom_mag_and_visits.png",
+            title=f"Zoom del bulbo — MOP + {release.name}",
+            left_label="MOP mag_now", right_label=f"{release.name} visits",
+            bulge_zoom=(20, 12),
+        )
     if target_plotter is not None:
         if verbose:
             print("[5/5] Reportes por target", flush=True)

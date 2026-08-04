@@ -12,6 +12,7 @@ dependencies = [
   "numpy>=1.24",
   "pandas>=2.0",
   "matplotlib>=3.7",
+  "tqdm>=4.66",
   "astropy>=6",
   "mop-api @ git+https://github.com/nowokaren/mop_api.git@44b4831",
 ]
@@ -20,7 +21,7 @@ dependencies = [
 test = ["pytest>=8"]
 
 [tool.setuptools]
-py-modules = ["target_selection_pipeline", "data_release_config"]
+py-modules = ["target_selection_pipeline", "data_release_config", "photometry", "target_report"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
