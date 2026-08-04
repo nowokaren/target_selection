@@ -1,7 +1,7 @@
 import pandas as pd
 
 from data_release_config import get_data_release
-from target_selection_pipeline import summarize_release_coverage
+from target_selection_pipeline import run_target_selection, summarize_release_coverage
 
 
 def test_dp2_profile_is_available():
@@ -25,3 +25,14 @@ def test_coverage_summary_counts_unique_visits_per_band():
     assert summary["coverage_n_calexps"] == 3
     assert summary["coverage_n_visits_g"] == 1
     assert summary["coverage_n_visits_r"] == 1
+
+
+def test_main_api_has_simple_defaults():
+    import inspect
+    import target_selection_pipeline as module
+
+    signature = inspect.signature(run_target_selection)
+    assert list(signature.parameters)[:2] == ["start_date", "end_date"]
+    assert signature.parameters["data_release"].default == "DP2"
+    assert signature.parameters["observatory"].default == "El Leoncito"
+    assert not hasattr(module, "run_pipeline")

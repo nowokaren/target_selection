@@ -1,7 +1,7 @@
 """Pipeline MOP + Rubin configurable para ejecutar desde un notebook o un script.
 
-El archivo no importa módulos de Rubin al importarse. El notebook debe pasarle
-los objetos ``tap_service`` y, opcionalmente, una función ``target_plotter``.
+El archivo no importa módulos de Rubin al importarse. Las conexiones a MOP,
+TAP y Butler se crean de forma diferida, y también pueden inyectarse.
 """
 
 from __future__ import annotations
@@ -498,22 +498,84 @@ def save_target_reports(
     )
 
 
-def run_pipeline(
-    mop,
-    tap_service,
+def _create_mop_client():
+    from mop_api import MOPClient
+
+    return MOPClient()
+
+
+def _create_tap_service(release: DataReleaseConfig):
+    from lsst.rsp import RSPDiscovery
+
+    return RSPDiscovery(release.rsp_instance).get_tap_client()
+
+
+def _create_butler(release: DataReleaseConfig):
+    from lsst.daf.butler import Butler
+
+    options = {}
+    if release.butler_collections is not None:
+        options["collections"] = release.butler_collections
+    return Butler(release.butler_repo, **options)
+
+
+def _create_default_target_plotter(
+    *, mop, tap_service, butler, release: DataReleaseConfig, root_dir: str | Path,
+):
+    from photometry import load_event_photometry
+    from target_report import plot_target
+
+    butler = butler or _create_butler(release)
+    photometry_dir = Path(root_dir) / "photometry"
+
+    def standard_target_plotter(target, coverage):
+        photometry = load_event_photometry(
+            target, mop=mop, cache_dir=photometry_dir,
+        )
+        return plot_target(
+            target, butler=butler, tap_service=tap_service,
+            data_release=release, calexps=coverage, photometry=photometry,
+        )
+
+    return standard_target_plotter
+
+
+def run_target_selection(
     start_date: str,
     end_date: str | None = None,
-    root_dir: str | Path = "target_selection_outputs",
+    *,
+    data_release: str | DataReleaseConfig = "DP2",
+    root_dir: str | Path = "outputs",
     observatory: str = "El Leoncito",
-    target_plotter: Callable | None = None,
+    mop=None,
+    tap_service=None,
+    butler=None,
+    target_plotter: Callable | bool | None = None,
     max_workers: int = 4,
     reuse_cache: bool = True,
     overwrite_target_plots: bool = False,
     verbose: bool = True,
-    data_release: str | DataReleaseConfig = "DP2",
 ) -> tuple[pd.DataFrame, dict[str, Path]]:
-    """Run the pipeline with a configurable Rubin data-release profile."""
+    """Select visible MOP targets and build Rubin coverage products.
+
+    MOP, TAP, Butler and the standard target reporter are initialized lazily
+    when omitted. Pass ``target_plotter=False`` to skip individual reports, or
+    pass a callable accepting ``(target_row, coverage_rows)`` to customize them.
+    """
     release = get_data_release(data_release)
+    mop = mop or _create_mop_client()
+    tap_service = tap_service or _create_tap_service(release)
+    if target_plotter is False:
+        report_plotter = None
+    elif target_plotter is None:
+        report_plotter = _create_default_target_plotter(
+            mop=mop, tap_service=tap_service, butler=butler,
+            release=release, root_dir=root_dir,
+        )
+    elif callable(target_plotter):
+        report_plotter = target_plotter
+    else:
+        raise TypeError("target_plotter debe ser callable, False o None.")
     end_date = end_date or start_date
     paths = create_run_structure(root_dir, start_date, end_date, release)
     daily_path = paths["tables"] / "visible_targets_daily.csv"
@@ -592,11 +654,11 @@ def run_pipeline(
             left_label="MOP mag_now", right_label=f"{release.name} visits",
             bulge_zoom=(20, 12),
         )
-    if target_plotter is not None:
+    if report_plotter is not None:
         if verbose:
             print("[5/5] Reportes por target", flush=True)
         save_target_reports(
-            combined, target_plotter, paths["targets"], coverage_rows,
+            combined, report_plotter, paths["targets"], coverage_rows,
             overwrite=overwrite_target_plots, verbose=verbose,
         )
 

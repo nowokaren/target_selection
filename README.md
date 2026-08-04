@@ -38,11 +38,27 @@ OUTPUT_DIR = Path("outputs")
 OBSERVATORY = "El Leoncito"
 ```
 
-Luego reiniciar el kernel y ejecutar **Run All**. La primera ejecución puede tardar por las consultas TAP, Butler y MOP; las siguientes reutilizan cachés.
+Luego reiniciar el kernel y ejecutar **Run All**. La función principal es `run_target_selection(...)`; crea automáticamente los clientes MOP, TAP y Butler y usa el reporte estándar. La primera ejecución puede tardar por las consultas TAP, Butler y MOP; las siguientes reutilizan cachés.
 
 - `max_workers=4`: concurrencia para consultas.
 - `reuse_cache=True`: reutiliza descargas y consultas anteriores.
 - `overwrite_target_plots=False`: conserva reportes vigentes.
+- `target_plotter=False`: omite los reportes individuales.
+
+La misma corrida puede ejecutarse desde Python sin construir manualmente las conexiones:
+
+```python
+from target_selection_pipeline import run_target_selection
+
+combined, paths = run_target_selection(
+    start_date="2026-08-01",
+    end_date="2026-08-15",
+    data_release="DP2",
+)
+```
+
+Para pruebas o configuraciones avanzadas se pueden pasar explícitamente `mop`,
+`tap_service`, `butler` o un `target_plotter` personalizado.
 
 ## Outputs
 
