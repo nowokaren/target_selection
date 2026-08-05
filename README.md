@@ -36,6 +36,10 @@ START_DATE = "2026-08-01"
 END_DATE = "2026-08-15"
 OUTPUT_DIR = Path("outputs")
 OBSERVATORY = "El Leoncito"
+
+SKY_MARKER_ENCODING = "split_color"  # or "color_size"
+SHOW_COVERAGE_BACKGROUND = False
+COVERAGE_RESOLUTION = 19
 ```
 
 Restart the kernel and select **Run All**. The main function is `run_target_selection(...)`; it automatically creates the MOP, TAP, and Butler clients and uses the standard report generator. The first run may take time because it queries MOP, TAP, and Butler; later runs reuse caches.
@@ -44,6 +48,12 @@ Restart the kernel and select **Run All**. The main function is `run_target_sele
 - `reuse_cache=True`: reuse previous downloads and queries.
 - `overwrite_target_plots=False`: keep current reports.
 - `target_plotter=False`: skip individual reports.
+- `sky_marker_encoding="split_color"`: encode magnitude and visits with two colored marker halves and two color bars.
+- `sky_marker_encoding="color_size"`: encode magnitude with color and total visits with marker size.
+- `show_coverage_background=True`: query and display a muted, low-resolution visit-density layer for the selected Data Release.
+- `coverage_resolution=19`: control the coarse background grid; 19 approximately matches one LSSTCam field of view per cell.
+
+The release-wide visit-center query is executed only when the background is enabled. Its result is cached as `release_visit_centers.csv`, so later runs do not query the complete release again. The layer is an approximate visualization of total visit density, not an exact detector-footprint map.
 
 The same run can be launched from Python without manually building the connections:
 
@@ -75,6 +85,7 @@ outputs/
     │   ├── visible_summary.csv         # Visibility + MOP parameters
     │   ├── coverage_raw.csv            # Rubin visit/detector rows
     │   ├── coverage_summary.csv        # Coverage and visits by band
+    │   ├── release_visit_centers.csv    # Optional cached background input
     │   ├── combined_targets.csv        # Complete MOP + Rubin table
     │   ├── target_summary.csv          # Compact scientific summary
     │   └── target_summary.png          # Visual summary table

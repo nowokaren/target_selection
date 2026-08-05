@@ -97,6 +97,39 @@ def query_release_coverage(
     return pd.concat(records, ignore_index=True) if records else pd.DataFrame(columns=columns)
 
 
+def query_release_visit_centers(
+    tap_service,
+    data_release: str | DataReleaseConfig = "DP2",
+) -> pd.DataFrame:
+    """Return one approximate sky position per visit for coverage maps.
+
+    Detector centers are averaged server-side, reducing the release-wide table
+    to one row per visit before transfer. The result is intended for coarse
+    coverage visualization, not exact footprint calculations.
+    """
+    release = get_data_release(data_release)
+    query = f"""
+        SELECT
+            vd.{release.visit_columns['visitId']} AS visitId,
+            AVG(vd.{release.tap_ra}) AS ra,
+            AVG(vd.{release.tap_dec}) AS dec
+        FROM {release.tap_visit_table} AS vd
+        GROUP BY vd.{release.visit_columns['visitId']}
+    """
+    job = tap_service.submit_job(query)
+    job.run()
+    job.wait(phases=["COMPLETED", "ERROR"])
+    if job.phase == "ERROR":
+        job.raise_if_error()
+    result = job.fetch_result().to_table().to_pandas()
+    result.columns = [str(column).lower() for column in result.columns]
+    expected = ["visitid", "ra", "dec"]
+    missing = [column for column in expected if column not in result]
+    if missing:
+        raise ValueError(f"Visit-center query is missing columns: {missing}")
+    return result[expected].rename(columns={"visitid": "visitId"})
+
+
 def summarize_release_coverage(coverage_rows: pd.DataFrame) -> pd.DataFrame:
     """Reduce detector-level coverage rows to one row per MOP target."""
     columns = [
@@ -266,8 +299,24 @@ def plot_sky_dual_metric(
     projection: str = "galactic",
     show_regions: bool = True,
     bulge_zoom: tuple[float, float] | None = None,
+    marker_encoding: str = "split_color",
+    coverage_background: pd.DataFrame | None = None,
+    coverage_resolution: int = 19,
+    coverage_label: str = "Data Release visits",
 ) -> None:
-    """Plot two metrics as the left and right halves of each target marker."""
+    """Plot target metrics with an optional low-resolution coverage layer.
+
+    ``marker_encoding`` accepts ``"split_color"`` (two colored halves) or
+    ``"color_size"`` (left metric as color, right metric as marker size).
+    ``coverage_background`` must contain visit-center ``ra`` and ``dec``
+    columns and is rendered as a muted coarse histogram.
+    """
+    if marker_encoding not in {"split_color", "color_size"}:
+        raise ValueError(
+            "marker_encoding must be 'split_color' or 'color_size'."
+        )
+    if int(coverage_resolution) < 4:
+        raise ValueError("coverage_resolution must be at least 4.")
     from astropy.coordinates import SkyCoord
     import astropy.units as u
     from matplotlib.path import Path as MarkerPath
@@ -305,6 +354,37 @@ def plot_sky_dual_metric(
         latitude = coords.dec.radian
         xlabel, ylabel = "RA", "Dec"
 
+    background_longitude = background_latitude = None
+    if coverage_background is not None and not coverage_background.empty:
+        required = {"ra", "dec"}
+        if not required.issubset(coverage_background.columns):
+            raise ValueError("coverage_background must contain ra and dec columns.")
+        background = coverage_background.copy()
+        background["ra"] = pd.to_numeric(background["ra"], errors="coerce")
+        background["dec"] = pd.to_numeric(background["dec"], errors="coerce")
+        background = background.dropna(subset=["ra", "dec"])
+        background_coords = SkyCoord(
+            background["ra"].to_numpy() * u.deg,
+            background["dec"].to_numpy() * u.deg, frame="icrs",
+        )
+        if use_galactic:
+            background_galactic = background_coords.galactic
+            background_lon_deg = background_galactic.l.wrap_at(180 * u.deg).degree
+            background_lat_deg = background_galactic.b.degree
+            if bulge_zoom is not None:
+                inside_background = (
+                    (np.abs(background_lon_deg) <= bulge_zoom[0])
+                    & (np.abs(background_lat_deg) <= bulge_zoom[1])
+                )
+                background_longitude = background_lon_deg[inside_background]
+                background_latitude = background_lat_deg[inside_background]
+            else:
+                background_longitude = np.deg2rad(background_lon_deg)
+                background_latitude = np.deg2rad(background_lat_deg)
+        else:
+            background_longitude = background_coords.ra.wrap_at(180 * u.deg).radian
+            background_latitude = background_coords.dec.radian
+
     def semicircle_marker(side: str) -> MarkerPath:
         start, stop = ((np.pi / 2, 3 * np.pi / 2) if side == "left" else (-np.pi / 2, np.pi / 2))
         angles = np.linspace(start, stop, 32)
@@ -315,9 +395,11 @@ def plot_sky_dual_metric(
 
     fig = plt.figure(figsize=(15, 6.7))
     map_projection = None if bulge_zoom is not None else "mollweide"
-    ax = fig.add_axes([.025, .045, .69, .74], projection=map_projection)
-    left_colorbar_ax = fig.add_axes([.07, .865, .285, .022])
-    right_colorbar_ax = fig.add_axes([.385, .865, .285, .022])
+    has_coverage_background = coverage_background is not None and not coverage_background.empty
+    map_height = .70 if has_coverage_background else .74
+    ax = fig.add_axes([.025, .045, .69, map_height], projection=map_projection)
+    left_colorbar_ax = fig.add_axes([.07, .888, .285, .022])
+    right_colorbar_ax = fig.add_axes([.385, .888, .285, .022])
     legend_ax = fig.add_axes([.72, .035, .275, .86])
     legend_ax.axis("off")
     fig.text(.37, .975, title or "MOP + Rubin targets", ha="center", va="top", fontsize=12)
@@ -334,7 +416,33 @@ def plot_sky_dual_metric(
                 ax.scatter([x], [y], marker="s", facecolors="none", edgecolors="deepskyblue", s=60, zorder=2)
                 ax.text(x, y, f"  {label}", color="deepskyblue", fontsize=8, va="center")
 
-    marker_size = 42
+    coverage_mappable = None
+    if background_longitude is not None and len(background_longitude):
+        resolution = int(coverage_resolution)
+        # Match the approximate cell count of HEALPix: 12 * nside**2.
+        full_lon_bins = max(8, int(round(np.sqrt(24) * resolution)))
+        full_lat_bins = max(4, int(round(np.sqrt(6) * resolution)))
+        if bulge_zoom is None:
+            grid_size = (full_lon_bins, full_lat_bins)
+            grid_extent = (-np.pi, np.pi, -np.pi / 2, np.pi / 2)
+        else:
+            grid_size = (
+                max(4, int(round(full_lon_bins * 2 * bulge_zoom[0] / 360))),
+                max(3, int(round(full_lat_bins * 2 * bulge_zoom[1] / 180))),
+            )
+            grid_extent = (-bulge_zoom[0], bulge_zoom[0], -bulge_zoom[1], bulge_zoom[1])
+        from matplotlib.colors import LinearSegmentedColormap, LogNorm
+        muted_greys = LinearSegmentedColormap.from_list(
+            "muted_greys", plt.get_cmap("Greys")(np.linspace(.38, .95, 256)),
+        )
+        coverage_mappable = ax.hexbin(
+            background_longitude, background_latitude,
+            gridsize=grid_size, extent=grid_extent, mincnt=1,
+            cmap=muted_greys, norm=LogNorm(vmin=1),
+            alpha=.65, linewidths=0, zorder=.25,
+        )
+
+    marker_size = 34
     left_array = left_values.to_numpy(dtype=float)
     right_array = right_values.to_numpy(dtype=float)
     left_cmap = plt.get_cmap("viridis").copy()
@@ -360,25 +468,53 @@ def plot_sky_dual_metric(
         & (left_array == 0) & (right_array == 0)
     )
 
-    def draw_half(values, marker, cmap, norm):
-        positive = np.isfinite(values) & (values > 0) & ~both_zero
-        zero = np.isfinite(values) & (values == 0) & ~both_zero
-        missing = ~np.isfinite(values) & ~both_zero
-        ax.scatter(longitude[positive], latitude[positive], c=values[positive], cmap=cmap, norm=norm,
-                   marker=marker, s=marker_size, edgecolor="none", zorder=3)
-        ax.scatter(longitude[zero], latitude[zero], color="black", marker=marker,
-                   s=marker_size, edgecolor="none", zorder=3)
-        ax.scatter(longitude[missing], latitude[missing], color="lightgray", marker=marker,
-                   s=marker_size, edgecolor="none", zorder=3)
+    if marker_encoding == "split_color":
+        def draw_half(values, marker, cmap, norm):
+            positive = np.isfinite(values) & (values > 0) & ~both_zero
+            zero = np.isfinite(values) & (values == 0) & ~both_zero
+            missing = ~np.isfinite(values) & ~both_zero
+            ax.scatter(longitude[positive], latitude[positive], c=values[positive], cmap=cmap, norm=norm,
+                       marker=marker, s=marker_size, edgecolor="none", zorder=3)
+            ax.scatter(longitude[zero], latitude[zero], color="black", marker=marker,
+                       s=marker_size, edgecolor="none", zorder=3)
+            ax.scatter(longitude[missing], latitude[missing], color="lightgray", marker=marker,
+                       s=marker_size, edgecolor="none", zorder=3)
 
-    draw_half(left_array, left_marker, left_cmap, left_norm)
-    draw_half(right_array, right_marker, right_cmap, right_norm)
+        draw_half(left_array, left_marker, left_cmap, left_norm)
+        draw_half(right_array, right_marker, right_cmap, right_norm)
+        regular = ~both_zero
+        ax.scatter(longitude[regular], latitude[regular], s=marker_size, facecolors="none",
+                   edgecolors="black", linewidths=.35, zorder=3.2)
+    else:
+        finite_visits = np.where(np.isfinite(right_array) & (right_array > 0), right_array, 0)
+        max_visits = float(finite_visits.max()) if finite_visits.size else 0.0
+        scaled = np.sqrt(finite_visits / max_visits) if max_visits > 0 else np.zeros_like(finite_visits)
+        sizes = 18 + 72 * scaled
+        positive_color = np.isfinite(left_array) & (left_array > 0) & ~both_zero
+        zero_color = np.isfinite(left_array) & (left_array == 0) & ~both_zero
+        missing_color = ~np.isfinite(left_array) & ~both_zero
+        ax.scatter(longitude[positive_color], latitude[positive_color], c=left_array[positive_color],
+                   cmap=left_cmap, norm=left_norm, s=sizes[positive_color],
+                   edgecolors="black", linewidths=.45, zorder=3)
+        ax.scatter(longitude[zero_color], latitude[zero_color], color="black",
+                   s=sizes[zero_color], edgecolors="black", linewidths=.45, zorder=3)
+        ax.scatter(longitude[missing_color], latitude[missing_color], color="lightgray",
+                   s=sizes[missing_color], edgecolors="black", linewidths=.45, zorder=3)
+        if max_visits > 0:
+            from matplotlib.lines import Line2D
+            legend_values = np.unique(np.rint(np.quantile(finite_visits[finite_visits > 0], [0, .5, 1])).astype(int))
+            handles = [
+                Line2D([], [], linestyle="", marker="o", markerfacecolor="white",
+                       markeredgecolor="black", markersize=np.sqrt(18 + 72 * np.sqrt(value / max_visits)),
+                       label=str(value))
+                for value in legend_values
+            ]
+            ax.legend(handles=handles, title=f"{right_label or right_metric}\n(marker size)",
+                      loc="lower left", fontsize=7, title_fontsize=7, framealpha=.88)
+
     left_mappable = plt.cm.ScalarMappable(norm=left_norm, cmap=left_cmap)
     right_mappable = plt.cm.ScalarMappable(norm=right_norm, cmap=right_cmap)
-    regular = ~both_zero
-    ax.scatter(longitude[regular], latitude[regular], s=marker_size, facecolors="none",
-               edgecolors="black", linewidths=.35, zorder=3.2)
-    ax.scatter(longitude[both_zero], latitude[both_zero], s=8, color="black",
+    ax.scatter(longitude[both_zero], latitude[both_zero], s=6, color="black",
                edgecolors="none", zorder=3.2)
 
     for number, row in data.iterrows():
@@ -394,12 +530,33 @@ def plot_sky_dual_metric(
     ax.grid(True, alpha=0.35)
 
     fig.colorbar(left_mappable, cax=left_colorbar_ax, orientation="horizontal")
-    fig.colorbar(right_mappable, cax=right_colorbar_ax, orientation="horizontal")
-    left_colorbar_ax.set_title(f"Left half: {left_label or left_metric}", fontsize=8, pad=3)
-    right_colorbar_ax.set_title(f"Right half: {right_label or right_metric}", fontsize=8, pad=3)
+    left_title = (
+        f"Left half: {left_label or left_metric}"
+        if marker_encoding == "split_color"
+        else f"Color: {left_label or left_metric}"
+    )
+    left_colorbar_ax.set_title(left_title, fontsize=8, pad=3)
     left_colorbar_ax.tick_params(labelsize=7, pad=1)
-    right_colorbar_ax.tick_params(labelsize=7, pad=1)
-    fig.text(.37, .815, "Black half = 0  |  Small black dot = both 0  |  Gray = missing", ha="center", va="center", fontsize=7)
+    if marker_encoding == "split_color":
+        fig.colorbar(right_mappable, cax=right_colorbar_ax, orientation="horizontal")
+        right_colorbar_ax.set_title(f"Right half: {right_label or right_metric}", fontsize=8, pad=3)
+        right_colorbar_ax.tick_params(labelsize=7, pad=1)
+    else:
+        right_colorbar_ax.axis("off")
+    note_y = .765 if coverage_mappable is not None else .815
+    if coverage_mappable is not None:
+        coverage_colorbar_ax = fig.add_axes([.2275, .808, .285, .022])
+        fig.colorbar(coverage_mappable, cax=coverage_colorbar_ax, orientation="horizontal")
+        coverage_colorbar_ax.set_title(
+            f"Background: {coverage_label} per low-resolution cell", fontsize=7, pad=1,
+        )
+        coverage_colorbar_ax.tick_params(labelsize=6, pad=1)
+    zero_note = (
+        "Black half = 0  |  Small black dot = both 0  |  Gray = missing"
+        if marker_encoding == "split_color"
+        else "Black = color value 0  |  Small black dot = both values 0  |  Gray = missing"
+    )
+    fig.text(.37, note_y, zero_note, ha="center", va="center", fontsize=7)
 
     references = "\n".join(f"{int(row['_reference_number'])}: {row['Target']}" for _, row in data.iterrows())
     legend_ax.text(0, 1, "References", va="top", fontsize=10, weight="bold")
@@ -554,6 +711,9 @@ def run_target_selection(
     max_workers: int = 4,
     reuse_cache: bool = True,
     overwrite_target_plots: bool = False,
+    sky_marker_encoding: str = "split_color",
+    show_coverage_background: bool = False,
+    coverage_resolution: int = 19,
     verbose: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, Path]]:
     """Select visible MOP targets and build Rubin coverage products.
@@ -627,6 +787,17 @@ def run_target_selection(
         )
         coverage_rows.to_csv(coverage_path, index=False)
 
+    visit_centers = None
+    if show_coverage_background:
+        visit_centers_path = paths["tables"] / "release_visit_centers.csv"
+        if reuse_cache and visit_centers_path.exists():
+            visit_centers = pd.read_csv(visit_centers_path)
+        else:
+            if verbose:
+                print("      Querying release-wide visit centers for the coverage background", flush=True)
+            visit_centers = query_release_visit_centers(tap_service, release)
+            visit_centers.to_csv(visit_centers_path, index=False)
+
     if verbose:
         print("[4/5] Tables and sky maps", flush=True)
     coverage_summary = summarize_release_coverage(coverage_rows)
@@ -646,6 +817,10 @@ def run_target_selection(
             paths["sky_plots"] / "sky_by_mag_and_visits.png",
             title=f"MOP targets with {release.name} coverage",
             left_label="MOP mag_now", right_label=f"{release.name} visits",
+            marker_encoding=sky_marker_encoding,
+            coverage_background=visit_centers,
+            coverage_resolution=coverage_resolution,
+            coverage_label=f"{release.name} visits",
         )
         plot_sky_dual_metric(
             combined, "mag_now", "coverage_n_visits",
@@ -653,6 +828,10 @@ def run_target_selection(
             title=f"Galactic bulge zoom — MOP + {release.name}",
             left_label="MOP mag_now", right_label=f"{release.name} visits",
             bulge_zoom=(20, 12),
+            marker_encoding=sky_marker_encoding,
+            coverage_background=visit_centers,
+            coverage_resolution=coverage_resolution,
+            coverage_label=f"{release.name} visits",
         )
     if report_plotter is not None:
         if verbose:
@@ -671,6 +850,9 @@ def run_target_selection(
         "cache_version": CACHE_VERSION,
         "target_report_version": TARGET_REPORT_VERSION,
         "overwrite_target_plots": bool(overwrite_target_plots),
+        "sky_marker_encoding": sky_marker_encoding,
+        "show_coverage_background": bool(show_coverage_background),
+        "coverage_resolution": int(coverage_resolution),
     }
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if verbose:
