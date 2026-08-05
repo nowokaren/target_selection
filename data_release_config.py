@@ -29,7 +29,7 @@ class DataReleaseConfig:
         required = ("visitId", "expMidptMJD", "band", "detector", "seeing", "magLim")
         missing = [name for name in required if name not in self.visit_columns]
         if missing:
-            raise ValueError(f"{self.name}: faltan aliases TAP: {missing}")
+            raise ValueError(f"{self.name}: missing TAP aliases: {missing}")
         return ", ".join(
             f"{alias}.{self.visit_columns[name]} AS {name}" for name in required
         )
@@ -96,7 +96,7 @@ def get_data_release(name: str | DataReleaseConfig = "DP2") -> DataReleaseConfig
         if key.upper() == normalized:
             return profile
     choices = ", ".join(RELEASES)
-    raise ValueError(f"Release desconocido {name!r}. Opciones: {choices}")
+    raise ValueError(f"Unknown release {name!r}. Options: {choices}")
 
 
 def register_data_release(profile: DataReleaseConfig) -> None:

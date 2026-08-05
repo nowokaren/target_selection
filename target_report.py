@@ -1,4 +1,4 @@
-"""Generación de reportes gráficos individuales de targets."""
+"""Generate graphical reports for individual targets."""
 
 import numpy as np
 import pandas as pd
@@ -18,7 +18,7 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
                      if hasattr(target, "index") else target)
     coord = SkyCoord(ra*u.deg, dec*u.deg)
 
-    # El pipeline entrega estas filas; la consulta queda sólo como fallback.
+    # The pipeline supplies these rows; the query is only a fallback.
     if calexps is None:
         query = f"""SELECT {data_release.visit_select("vd")}
                     FROM {data_release.tap_visit_table} AS vd
@@ -28,7 +28,7 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
         if job.phase == "ERROR": job.raise_if_error()
         calexps = job.fetch_result().to_table().to_pandas()
 
-    # Una única consulta Butler devuelve todas las bandas que cubren el punto.
+    # One Butler query returns every band covering the position.
     refs = []
     for dataset_type in data_release.coadd_dataset_types:
         try:
@@ -62,7 +62,7 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
         if result is None:
             for row in range(4):
                 ax = fig.add_subplot(gs[row,j]); ax.axis("off")
-                if row == 0: ax.text(.5,.5,f"Sin coadd {band}",ha="center")
+                if row == 0: ax.text(.5,.5,f"No coadd {band}",ha="center")
             continue
         coadd, x, y = result
 
@@ -113,7 +113,7 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
         photometry = photometry_loader(name) if photometry_loader is not None else pd.DataFrame()
     selected_filters = select_lightcurve_filters(photometry)
     if not selected_filters:
-        message = photometry.attrs.get("error", "Sin fotometría disponible")
+        message = photometry.attrs.get("error", "No photometry available")
         ax_lc.text(.5, .5, message, ha="center", va="center", transform=ax_lc.transAxes)
         ax_lc.set_axis_off()
     else:
@@ -145,7 +145,7 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
             y_min, y_max = ax_lc.get_ylim()
             ax_lc.vlines(
                 release_dates, y_min, y_max, color="tab:purple", alpha=.18, linewidth=.7,
-                label=f"Épocas {data_release.name} (N={release_dates.size})", zorder=0,
+                label=f"{data_release.name} epochs (N={release_dates.size})", zorder=0,
             )
             ax_lc.set_ylim(y_min, y_max)
 
@@ -153,7 +153,7 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
         ax_lc.xaxis.set_major_locator(locator)
         ax_lc.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
         ax_lc.invert_yaxis()
-        ax_lc.set(xlabel="Fecha", ylabel="Magnitud", title=f"Fotometría MOP + épocas {data_release.name}")
+        ax_lc.set(xlabel="Date", ylabel="Magnitude", title=f"MOP photometry + {data_release.name} epochs")
         ax_lc.grid(alpha=.25)
         ax_lc.legend(frameon=False, ncol=min(3, len(selected_filters) + bool(release_dates.size)))
 
@@ -166,8 +166,8 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
     mop_cols.sort(key=lambda c: (not any(key in str(c).lower() for key in preferred), str(c)))
 
     label_names = {
-        "mag_now": "Magnitud actual", "Min airmass": "Airmass mínimo",
-        "n_visible_nights": "Noches visibles", "coverage_n_visits": "Visitas Rubin",
+        "mag_now": "Current magnitude", "Min airmass": "Minimum airmass",
+        "n_visible_nights": "Visible nights", "coverage_n_visits": "Rubin visits",
     }
     def panel_line(column):
         raw_label = str(column).removeprefix("mop_")
@@ -179,11 +179,11 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
         return f"{label}: {value}{unit}"
 
     valid_cols = [c for c in meta_cols + mop_cols if str(target[c]).strip().lower() not in {"nan", "none", ""}]
-    panel_lines = ["DATOS DEL TARGET", "", f"RA: {ra:.5f}°", f"Dec: {dec:.5f}°", f"Filas cobertura: {len(calexps)}"]
+    panel_lines = ["TARGET DATA", "", f"RA: {ra:.5f}°", f"Dec: {dec:.5f}°", f"Coverage rows: {len(calexps)}"]
     if priority:
         panel_lines.extend(["", "PRIORITY"])
     if valid_cols:
-        panel_lines.extend(["", "PARÁMETROS", ""] + [panel_line(c) for c in valid_cols])
+        panel_lines.extend(["", "PARAMETERS", ""] + [panel_line(c) for c in valid_cols])
 
     fig.suptitle(f"{name}{flag}", y=.985, fontsize=14,
                  color="crimson" if priority else "black",

@@ -1,4 +1,4 @@
-"""Carga, caché y preparación de fotometría de MOP."""
+"""Load, cache, and prepare MOP photometry."""
 
 from pathlib import Path
 import re
@@ -11,7 +11,7 @@ def _safe_target_name(value: object) -> str:
 
 
 def load_event_photometry(target, *, mop, cache_dir, refresh=False):
-    """Obtiene la fotometría por nombre, con fallback posicional y caché CSV."""
+    """Fetch photometry by name, with a positional fallback and CSV cache."""
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
     is_row = hasattr(target, "get")
@@ -33,7 +33,7 @@ def load_event_photometry(target, *, mop, cache_dir, refresh=False):
 
 
 def select_lightcurve_filters(photometry):
-    """Prioriza OGLE_I y G; si faltan, elige el filtro con más puntos."""
+    """Prefer OGLE_I and G; otherwise select the filter with the most points."""
     if photometry.empty or "Filter" not in photometry:
         return []
     labels = {str(value).casefold(): value for value in photometry["Filter"].dropna().unique()}
@@ -45,7 +45,7 @@ def select_lightcurve_filters(photometry):
 
 
 def prepare_lightcurve_data(photometry, filter_name):
-    """Normaliza fechas y columnas numéricas de una curva de luz."""
+    """Normalize dates and numeric columns in a light curve."""
     data = photometry.loc[photometry["Filter"] == filter_name].copy()
     data["Timestamp"] = pd.to_datetime(data["Timestamp"], errors="coerce", utc=True).dt.tz_convert(None)
     data["Magnitude"] = pd.to_numeric(data["Magnitude"], errors="coerce")

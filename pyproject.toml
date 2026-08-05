@@ -14,7 +14,7 @@ dependencies = [
   "matplotlib>=3.7",
   "tqdm>=4.66",
   "astropy>=6",
-  "mop-api @ git+https://github.com/nowokaren/mop_api.git@44b4831",
+  "mop-api @ git+https://github.com/nowokaren/mop_api.git@28f8f87",
 ]
 
 [project.optional-dependencies]

@@ -1,22 +1,22 @@
-# Selección de targets MOP con cobertura Rubin
+# MOP target selection with Rubin coverage
 
-Este proyecto cruza los targets visibles de MOP con la cobertura de un Data Preview/Data Release de Rubin y genera tablas, mapas del cielo y reportes gráficos por target. La ejecución validada actualmente es **DP2**; los perfiles DP0.1, DP0.2 y DP1 pueden requerir ajustar colecciones o tablas según la instancia del RSP.
+This project cross-matches visible MOP targets with a Rubin Data Preview/Data Release and generates tables, sky maps, and graphical reports for each target. The currently validated run uses **DP2**; the DP0.1, DP0.2, and DP1 profiles may require collection or table adjustments for a specific RSP deployment.
 
-## Archivos del proyecto
+## Project files
 
-- `mop_lsst.ipynb`: punto de entrada; se ejecuta en orden.
-- `target_selection_pipeline.py`: orquestación, consultas, caché, tablas y mapas.
-- `photometry.py`: descarga, caché y preparación de fotometría MOP.
-- `target_report.py`: dashboard gráfico de cada target.
-- `data_release_config.py`: configuración de DP0.1, DP0.2, DP1 y DP2.
+- `mop_lsst.ipynb`: ordered entry point for an interactive run.
+- `target_selection_pipeline.py`: orchestration, queries, caching, tables, and sky maps.
+- `photometry.py`: MOP photometry loading, caching, and preparation.
+- `target_report.py`: graphical dashboard for each target.
+- `data_release_config.py`: DP0.1, DP0.2, DP1, and DP2 configuration.
 
-El notebook sólo configura las conexiones, llama a las funciones instaladas y muestra sus productos.
+The notebook only configures the run, calls installed functions, and displays the generated products.
 
-## Requisitos
+## Requirements
 
-1. Una cuenta con acceso al Rubin Science Platform (RSP) y al DataRelease elegido.
-2. Ejecutar el notebook dentro del entorno científico del RSP.
-3. Clonar este repositorio e instalarlo dentro del entorno RSP:
+1. An account with access to the Rubin Science Platform (RSP) and the selected Data Release.
+2. Run the notebook inside the RSP scientific environment.
+3. Clone and install this repository in the RSP environment:
 
 ```bash
 git clone https://github.com/nowokaren/target_selection.git
@@ -24,28 +24,28 @@ cd target_selection
 python -m pip install -e .
 ```
 
-La instalación descarga automáticamente la versión probada de `mop_api` desde GitHub. Las bibliotecas `lsst.*` no se instalan con pip: son provistas por el entorno científico del RSP.
+The installation automatically downloads the tested `mop_api` version from GitHub. The `lsst.*` libraries are supplied by the RSP environment and are not installed with pip.
 
-## Uso rápido
+## Quick start
 
-Abrir `mop_lsst.ipynb` y modificar la celda **Configuración y conexiones**:
+Open `mop_lsst.ipynb` and edit the **Configuration** cell:
 
 ```python
-DATA_RELEASE_NAME = "DP2"  # DP0.1, DP0.2, DP1 o DP2
+DATA_RELEASE_NAME = "DP2"  # DP0.1, DP0.2, DP1, or DP2
 START_DATE = "2026-08-01"
 END_DATE = "2026-08-15"
 OUTPUT_DIR = Path("outputs")
 OBSERVATORY = "El Leoncito"
 ```
 
-Luego reiniciar el kernel y ejecutar **Run All**. La función principal es `run_target_selection(...)`; crea automáticamente los clientes MOP, TAP y Butler y usa el reporte estándar. La primera ejecución puede tardar por las consultas TAP, Butler y MOP; las siguientes reutilizan cachés.
+Restart the kernel and select **Run All**. The main function is `run_target_selection(...)`; it automatically creates the MOP, TAP, and Butler clients and uses the standard report generator. The first run may take time because it queries MOP, TAP, and Butler; later runs reuse caches.
 
-- `max_workers=4`: concurrencia para consultas.
-- `reuse_cache=True`: reutiliza descargas y consultas anteriores.
-- `overwrite_target_plots=False`: conserva reportes vigentes.
-- `target_plotter=False`: omite los reportes individuales.
+- `max_workers=4`: query concurrency.
+- `reuse_cache=True`: reuse previous downloads and queries.
+- `overwrite_target_plots=False`: keep current reports.
+- `target_plotter=False`: skip individual reports.
 
-La misma corrida puede ejecutarse desde Python sin construir manualmente las conexiones:
+The same run can be launched from Python without manually building the connections:
 
 ```python
 from target_selection_pipeline import run_target_selection
@@ -57,63 +57,62 @@ combined, paths = run_target_selection(
 )
 ```
 
-Para pruebas o configuraciones avanzadas se pueden pasar explícitamente `mop`,
-`tap_service`, `butler` o un `target_plotter` personalizado.
+For tests or advanced configurations, explicitly pass `mop`, `tap_service`, `butler`, or a custom `target_plotter`.
 
 ## Outputs
 
-Para DP2, una corrida queda en:
+For DP2, one run produces:
 
 ```text
 outputs/
-├── photometry/                         # Fotometría MOP, un CSV por target
-├── mop_event_cache/                    # Caché de datos MOP
+├── photometry/                         # One MOP photometry CSV per target
+├── mop_event_cache/                    # MOP event-data cache
 └── YYYY-MM-DD_to_YYYY-MM-DD/
-    ├── manifest.json                   # Configuración de la corrida
-    ├── plot_errors.csv                 # Errores aislados de reportes
+    ├── manifest.json                   # Run configuration and metadata
+    ├── plot_errors.csv                 # Isolated report errors
     ├── tables/
-    │   ├── visible_targets_daily.csv   # Visibilidad por fecha
-    │   ├── visible_summary.csv         # Visibilidad + parámetros MOP
-    │   ├── coverage_raw.csv            # Filas Rubin visita/detector
-    │   ├── coverage_summary.csv        # Cobertura y visitas por banda
-    │   ├── combined_targets.csv        # Tabla completa MOP + Rubin
-    │   ├── target_summary.csv          # Resumen científico
-    │   └── target_summary.png          # Tabla resumen visual
-    ├── sky_plots/                      # Mapas de targets
+    │   ├── visible_targets_daily.csv   # Visibility by date
+    │   ├── visible_summary.csv         # Visibility + MOP parameters
+    │   ├── coverage_raw.csv            # Rubin visit/detector rows
+    │   ├── coverage_summary.csv        # Coverage and visits by band
+    │   ├── combined_targets.csv        # Complete MOP + Rubin table
+    │   ├── target_summary.csv          # Compact scientific summary
+    │   └── target_summary.png          # Visual summary table
+    ├── sky_plots/                      # Full-sky and bulge maps
     └── targets/
-        ├── <Target>_target_report.png  # Reporte individual
-        └── report_versions.json        # Control de caché
+        ├── <Target>_target_report.png  # Individual report
+        └── report_versions.json        # Report cache control
 ```
 
-Para otros DataReleases se agrega una carpeta con el nombre del release.
+Other Data Releases add a directory named after the release.
 
-### Qué tabla consultar
+### Which table should I use?
 
-- Lista final y todas las propiedades: `combined_targets.csv`.
-- Visitas por filtro, puntos MOP, `t_E`, `t_0` y `u_0`: `target_summary.csv`.
-- Visitas/detectores sin agregar: `coverage_raw.csv`.
-- Fotometría completa: `outputs/photometry/<Target>.csv`.
+- Final target list and all properties: `combined_targets.csv`.
+- Visits by filter, MOP points, `t_E`, `t_0`, and `u_0`: `target_summary.csv`.
+- Unaggregated visit/detector rows: `coverage_raw.csv`.
+- Complete photometry: `outputs/photometry/<Target>.csv`.
 
-Los conteos `n_visits_<filtro>` representan `visitId` únicos. Sólo se crea un reporte individual si existe al menos un coadd que contenga la posición.
+The `n_visits_<filter>` counts represent unique `visitId` values. An individual report is created only when at least one coadd contains the target position. Reports currently display coadds, not individual exposures.
 
-## Repetir o actualizar una corrida
+## Repeating or refreshing a run
 
-- Misma configuración: `reuse_cache=True`.
-- Forzar datos nuevos: `reuse_cache=False`.
-- Regenerar todos los PNG: `overwrite_target_plots=True`.
-- Después de modificar código, reiniciar el kernel o ejecutar nuevamente la celda de imports.
+- Same configuration: `reuse_cache=True`.
+- Force fresh data: `reuse_cache=False`.
+- Rebuild every PNG: `overwrite_target_plots=True`.
+- After editing code, restart the kernel or rerun the imports cell.
 
-## Compartir el proyecto
+## Sharing the project
 
-Este proyecto debe publicarse en un repositorio Git separado de `mop_api`. El `.gitignore` excluye `outputs/`, cachés y checkpoints. Para compartir resultados concretos, comprimir sólo la carpeta de la corrida correspondiente.
+This project belongs in a Git repository separate from `mop_api`. The `.gitignore` excludes outputs, caches, and checkpoints. To share a specific result, archive only the corresponding run directory.
 
-La dependencia declarada en `pyproject.toml` fija `mop_api` al commit probado `44b4831`. Para adoptar una versión nueva de esa API hay que actualizar explícitamente ese hash y volver a ejecutar las pruebas.
+The dependency in `pyproject.toml` pins `mop_api` to the tested commit `28f8f87`. To adopt a newer API version, update that hash explicitly and rerun the tests.
 
-## Desarrollo y pruebas
+## Development and tests
 
 ```bash
 python -m pip install -e ".[test]"
 pytest
 ```
 
-GitHub Actions ejecuta estas pruebas automáticamente en cada push y pull request. Las pruebas unitarias no requieren acceso a Rubin; la ejecución completa del notebook sí requiere RSP.
+GitHub Actions runs these tests on every push and pull request. Unit tests do not require Rubin access; a full notebook run requires the RSP.

@@ -1,7 +1,7 @@
-"""Pipeline MOP + Rubin configurable para ejecutar desde un notebook o un script.
+"""Configurable MOP + Rubin pipeline for notebooks and scripts.
 
-El archivo no importa módulos de Rubin al importarse. Las conexiones a MOP,
-TAP y Butler se crean de forma diferida, y también pueden inyectarse.
+Rubin modules are not imported at module load time. MOP, TAP, and Butler
+connections are created lazily and can also be injected.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from data_release_config import DataReleaseConfig, get_data_release
 
 
 CACHE_VERSION = 3
-TARGET_REPORT_VERSION = 5
+TARGET_REPORT_VERSION = 6
 
 
 def _safe_name(value: object) -> str:
@@ -230,11 +230,11 @@ def save_target_summary(
     fig = plt.figure(figsize=(fig_width, fig_height))
     ax = fig.add_axes([.015, .015, .97, .885])
     ax.axis("off")
-    fig.suptitle(f"Resumen de targets MOP + Rubin {release_name}", fontsize=15, fontweight="bold", y=.995)
+    fig.suptitle(f"MOP + Rubin {release_name} target summary", fontsize=15, fontweight="bold", y=.995)
     fig.text(
         .5, .955,
-        f"Visibles: {n_visible}  |  Con cobertura {release_name}: {n_matched}  |  "
-        f"Con fotometría MOP: {n_photometry}  |  Con cobertura + fotometría: {n_matched_photometry}",
+        f"Visible: {n_visible}  |  With {release_name} coverage: {n_matched}  |  "
+        f"With MOP photometry: {n_photometry}  |  With coverage + photometry: {n_matched_photometry}",
         ha="center", va="top", fontsize=11,
     )
     table = ax.table(
@@ -326,7 +326,7 @@ def plot_sky_dual_metric(
         plane_limit = 8 if bulge_zoom is not None else np.deg2rad(8)
         ax.axhspan(-plane_limit, plane_limit, color="gold", alpha=0.10, zorder=0)
         ax.scatter([0], [0], marker="x", color="darkorange", s=70, linewidths=1.3, zorder=2)
-        ax.text(0.02, 0.08, "Bulbo", transform=ax.transAxes, color="darkorange", fontsize=9)
+        ax.text(0.02, 0.08, "Galactic bulge", transform=ax.transAxes, color="darkorange", fontsize=9)
         if bulge_zoom is None:
             for lon, lat, label in [(280, -33, "LMC"), (303, -44, "SMC")]:
                 x = np.deg2rad(((lon + 180) % 360) - 180)
@@ -395,14 +395,14 @@ def plot_sky_dual_metric(
 
     fig.colorbar(left_mappable, cax=left_colorbar_ax, orientation="horizontal")
     fig.colorbar(right_mappable, cax=right_colorbar_ax, orientation="horizontal")
-    left_colorbar_ax.set_title(f"Mitad izquierda: {left_label or left_metric}", fontsize=8, pad=3)
-    right_colorbar_ax.set_title(f"Mitad derecha: {right_label or right_metric}", fontsize=8, pad=3)
+    left_colorbar_ax.set_title(f"Left half: {left_label or left_metric}", fontsize=8, pad=3)
+    right_colorbar_ax.set_title(f"Right half: {right_label or right_metric}", fontsize=8, pad=3)
     left_colorbar_ax.tick_params(labelsize=7, pad=1)
     right_colorbar_ax.tick_params(labelsize=7, pad=1)
-    fig.text(.37, .815, "Mitad negra = 0  |  Punto negro pequeño = ambos 0  |  Gris = sin dato", ha="center", va="center", fontsize=7)
+    fig.text(.37, .815, "Black half = 0  |  Small black dot = both 0  |  Gray = missing", ha="center", va="center", fontsize=7)
 
     references = "\n".join(f"{int(row['_reference_number'])}: {row['Target']}" for _, row in data.iterrows())
-    legend_ax.text(0, 1, "Referencias", va="top", fontsize=10, weight="bold")
+    legend_ax.text(0, 1, "References", va="top", fontsize=10, weight="bold")
     legend_ax.text(0, .955, references, va="top", fontsize=7, family="monospace", linespacing=1.18)
     fig.savefig(output_path, dpi=180, bbox_inches="tight", pad_inches=.04)
     plt.close(fig)
@@ -438,18 +438,18 @@ def save_target_reports(
     generated = skipped = no_coadd = 0
     if verbose:
         print(
-            "Referencias — reutilizados: PNG vigente; generados: PNG nuevo; "
-            "sin coadd: no genera PNG; errores: fallos aislados.",
+            "Legend — reused: current PNG; generated: new PNG; "
+            "no coadd: no PNG; errors: isolated failures.",
             flush=True,
         )
     progress = tqdm(
-        targets.iterrows(), total=total, desc="Reportes", unit="target",
+        targets.iterrows(), total=total, desc="Reports", unit="target",
         disable=not verbose, dynamic_ncols=True, mininterval=1.0,
     )
 
     def update_progress() -> None:
         progress.set_postfix(
-            reutilizados=skipped, generados=generated, sin_coadd=no_coadd, errores=len(plot_errors), refresh=False,
+            reused=skipped, generated=generated, no_coadd=no_coadd, errors=len(plot_errors), refresh=False,
         )
 
     for _, row in progress:
@@ -472,7 +472,7 @@ def save_target_reports(
             if verbose:
                 message = str(exc)
                 short_message = message if len(message) <= 300 else message[:297] + "..."
-                print(f"    error en {row['Target']}: {short_message}", flush=True)
+                print(f"    error for {row['Target']}: {short_message}", flush=True)
             continue
         if figure is None:
             no_coadd += 1
@@ -490,8 +490,8 @@ def save_target_reports(
     progress.close()
     if verbose:
         tqdm.write(
-            f"Reportes terminados: generados={generated}, "
-            f"reutilizados={skipped}, sin coadd={no_coadd}, errores={len(plot_errors)}"
+            f"Reports complete: generated={generated}, "
+            f"reused={skipped}, no coadd={no_coadd}, errors={len(plot_errors)}"
         )
     pd.DataFrame(plot_errors, columns=["Target", "error"]).to_csv(
         output_dir.parent / "plot_errors.csv", index=False
@@ -575,7 +575,7 @@ def run_target_selection(
     elif callable(target_plotter):
         report_plotter = target_plotter
     else:
-        raise TypeError("target_plotter debe ser callable, False o None.")
+        raise TypeError("target_plotter must be callable, False, or None.")
     end_date = end_date or start_date
     paths = create_run_structure(root_dir, start_date, end_date, release)
     daily_path = paths["tables"] / "visible_targets_daily.csv"
@@ -592,7 +592,7 @@ def run_target_selection(
             cache_valid = False
 
     if verbose:
-        print("[1/5] Targets visibles MOP" + (" (cache)" if cache_valid else ""), flush=True)
+        print("[1/5] Visible MOP targets" + (" (cache)" if cache_valid else ""), flush=True)
     if cache_valid and daily_path.exists():
         daily = pd.read_csv(daily_path)
     else:
@@ -603,7 +603,7 @@ def run_target_selection(
         daily.to_csv(daily_path, index=False)
 
     if verbose:
-        print("[2/5] Parámetros + fotometría MOP" + (" (cache)" if cache_valid else ""), flush=True)
+        print("[2/5] MOP parameters + photometry" + (" (cache)" if cache_valid else ""), flush=True)
     if cache_valid and summary_path.exists():
         summary = pd.read_csv(summary_path)
     else:
@@ -618,7 +618,7 @@ def run_target_selection(
         summary.to_csv(summary_path, index=False)
 
     if verbose:
-        print(f"[3/5] Cobertura {release.name}" + (" (cache)" if cache_valid else f" ({max_workers} workers)"), flush=True)
+        print(f"[3/5] {release.name} coverage" + (" (cache)" if cache_valid else f" ({max_workers} workers)"), flush=True)
     if cache_valid and coverage_path.exists():
         coverage_rows = pd.read_csv(coverage_path)
     else:
@@ -628,7 +628,7 @@ def run_target_selection(
         coverage_rows.to_csv(coverage_path, index=False)
 
     if verbose:
-        print("[4/5] Tablas y mapas", flush=True)
+        print("[4/5] Tables and sky maps", flush=True)
     coverage_summary = summarize_release_coverage(coverage_rows)
     coverage_summary.to_csv(paths["tables"] / "coverage_summary.csv", index=False)
     combined = summary.merge(coverage_summary, on="Target", how="left")
@@ -644,19 +644,19 @@ def run_target_selection(
         plot_sky_dual_metric(
             combined, "mag_now", "coverage_n_visits",
             paths["sky_plots"] / "sky_by_mag_and_visits.png",
-            title=f"Targets MOP con cobertura {release.name}",
+            title=f"MOP targets with {release.name} coverage",
             left_label="MOP mag_now", right_label=f"{release.name} visits",
         )
         plot_sky_dual_metric(
             combined, "mag_now", "coverage_n_visits",
             paths["sky_plots"] / "sky_bulge_zoom_mag_and_visits.png",
-            title=f"Zoom del bulbo — MOP + {release.name}",
+            title=f"Galactic bulge zoom — MOP + {release.name}",
             left_label="MOP mag_now", right_label=f"{release.name} visits",
             bulge_zoom=(20, 12),
         )
     if report_plotter is not None:
         if verbose:
-            print("[5/5] Reportes por target", flush=True)
+            print("[5/5] Per-target reports", flush=True)
         save_target_reports(
             combined, report_plotter, paths["targets"], coverage_rows,
             overwrite=overwrite_target_plots, verbose=verbose,
@@ -674,5 +674,5 @@ def run_target_selection(
     }
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if verbose:
-        print(f"Pipeline completo en {(perf_counter() - started) / 60:.1f} min", flush=True)
+        print(f"Pipeline completed in {(perf_counter() - started) / 60:.1f} min", flush=True)
     return combined, paths
