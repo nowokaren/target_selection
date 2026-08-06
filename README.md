@@ -94,6 +94,9 @@ save_selected_visibility_plots(selected_for_all_nights, "final_visibility_plots"
 plot_visibility_sequence(
     selected_for_all_nights,
     "visibility_sequence.pdf",
+    minimum_peak_altitude=50,
+    minimum_night_fraction=.50,
+    selection_rule="all",
     x_reference_every=4,
 )
 ```

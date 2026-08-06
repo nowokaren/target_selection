@@ -280,6 +280,9 @@ def plot_visibility_sequence(
     date_column: str = "observation_date",
     observatory: str | dict = "El Leoncito",
     minimum_altitude: float = 30.0,
+    minimum_peak_altitude: float | None = None,
+    minimum_night_fraction: float | None = None,
+    selection_rule: str | None = None,
     time_step_minutes: int = 10,
     x_reference_every: int = 4,
     output_format: str | None = None,
@@ -401,12 +404,20 @@ def plot_visibility_sequence(
         fontsize=7, frameon=False, bbox_to_anchor=(.5, .005),
     )
     legend_rows = np.ceil(len(handles) / legend_columns)
-    fig.suptitle(
-        f"Selected-target visibility — {observatory_name}",
-        y=.997, fontsize=13,
-    )
+    fig.suptitle(f"Selected-target visibility — {observatory_name}", y=.997, fontsize=13)
+    if minimum_peak_altitude is not None and minimum_night_fraction is not None:
+        rule_label = "both criteria required" if selection_rule == "all" else "either criterion required"
+        criteria = (
+            "Selection criteria: "
+            f"peak altitude ≥ {minimum_peak_altitude:g}°; "
+            f"≥ {100 * minimum_night_fraction:g}% of astronomical night "
+            f"at altitude ≥ {minimum_altitude:g}°; {rule_label}."
+        )
+    else:
+        criteria = "Selection criteria: observer-supplied final target list."
+    fig.text(.5, .979, criteria, ha="center", va="top", fontsize=8.5)
     fig.subplots_adjust(
-        top=.982, bottom=min(.22, .035 + .018 * legend_rows),
+        top=.963, bottom=min(.22, .035 + .018 * legend_rows),
         left=.065, right=.99, hspace=.12,
     )
     fig.savefig(
