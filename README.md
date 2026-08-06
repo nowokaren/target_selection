@@ -8,6 +8,7 @@ This project cross-matches visible MOP targets with a Rubin Data Preview/Data Re
 - `target_selection_pipeline.py`: orchestration, queries, caching, tables, and sky maps.
 - `photometry.py`: MOP photometry loading, caching, and preparation.
 - `target_report.py`: graphical dashboard for each target.
+- `visibility_plotter.py`: local nightly altitude, airmass, twilight, and Moon plots.
 - `data_release_config.py`: DP0.1, DP0.2, DP1, and DP2 configuration.
 
 The notebook only configures the run, calls installed functions, and displays the generated products.
@@ -52,6 +53,13 @@ Restart the kernel and select **Run All**. The main function is `run_target_sele
 - `sky_marker_encoding="color_size"`: encode magnitude with color and total visits with marker size.
 - `show_coverage_background=True`: query and display a muted, low-resolution visit-density layer for the selected Data Release.
 - `coverage_resolution=19`: control the coarse background grid; 19 approximately matches one LSSTCam field of view per cell.
+- `generate_visibility_plots=True`: create one local visibility plot per requested night.
+- `visibility_minimum_altitude=30`: altitude used to count observable astronomical-night time.
+- `visibility_minimum_peak_altitude=50`: minimum peak altitude reached during astronomical night.
+- `visibility_minimum_night_fraction=0.50`: minimum fraction of astronomical night above the altitude threshold.
+- `visibility_selection_rule="all"`: require both criteria; use `"either"` to accept either criterion.
+- `visibility_time_step_minutes=10`: temporal sampling of visibility curves.
+- `overwrite_visibility_plots=False`: reuse existing nightly PNG files.
 
 The release-wide visit-center query is executed only when the background is enabled. Its result is cached as `release_visit_centers.csv`, so later runs do not query the complete release again. The layer is an approximate visualization of total visit density, not an exact detector-footprint map.
 
@@ -68,6 +76,29 @@ combined, paths = run_target_selection(
 ```
 
 For tests or advanced configurations, explicitly pass `mop`, `tap_service`, `butler`, or a custom `target_plotter`.
+
+
+The automatic visibility plots contain only targets passing the configurable peak-altitude and observable-night-fraction criteria. To make plots from a manually reviewed final selection without applying another filter:
+
+```python
+from visibility_plotter import (
+    plot_selected_visibility,
+    plot_visibility_sequence,
+    save_selected_visibility_plots,
+)
+
+plot_selected_visibility(selected_for_one_night, "2026-08-05", "final_visibility.png")
+save_selected_visibility_plots(selected_for_all_nights, "final_visibility_plots")
+
+# Stack all selected nights chronologically; the extension chooses PDF or PNG.
+plot_visibility_sequence(
+    selected_for_all_nights,
+    "visibility_sequence.pdf",
+    x_reference_every=4,
+)
+```
+
+For explicit selection outside the pipeline, use `select_nightly_targets(...)`. Set `return_all=True` to retain rejected targets and their reasons. `plot_visibility_sequence(...)` shares the 18:00–06:00 axis, orders panels chronologically, repeats time labels every `x_reference_every` nights, and writes PDF by default when no extension is supplied.
 
 ## Outputs
 
@@ -90,6 +121,8 @@ outputs/
     │   ├── target_summary.csv          # Compact scientific summary
     │   └── target_summary.png          # Visual summary table
     ├── sky_plots/                      # Full-sky and bulge maps
+    ├── visibility_plots/               # Automatically filtered nightly plots
+    │   └── visibility_selection.csv    # Metrics, decisions, and rejection reasons
     └── targets/
         ├── <Target>_target_report.png  # Individual report
         └── report_versions.json        # Report cache control
@@ -127,3 +160,7 @@ pytest
 ```
 
 GitHub Actions runs these tests on every push and pull request. Unit tests do not require Rubin access; a full notebook run requires the RSP.
+
+## Future development
+
+The proposed observability filtering, scientific prioritization, JS/HSH exposure models, and nightly scheduling workflow are documented in [ROADMAP.md](ROADMAP.md). These Target Selection 2.0 ideas are intentionally separated from the validated version 1 pipeline until their scientific and operational criteria are agreed upon.

@@ -45,6 +45,7 @@ def create_run_structure(
         "run": run_dir,
         "tables": run_dir / "tables",
         "sky_plots": run_dir / "sky_plots",
+        "visibility_plots": run_dir / "visibility_plots",
         "targets": run_dir / "targets",
     }
     for path in paths.values():
@@ -714,6 +715,13 @@ def run_target_selection(
     sky_marker_encoding: str = "split_color",
     show_coverage_background: bool = False,
     coverage_resolution: int = 19,
+    generate_visibility_plots: bool = True,
+    overwrite_visibility_plots: bool = False,
+    visibility_minimum_altitude: float = 30.0,
+    visibility_minimum_peak_altitude: float = 50.0,
+    visibility_minimum_night_fraction: float = 0.50,
+    visibility_selection_rule: str = "all",
+    visibility_time_step_minutes: int = 10,
     verbose: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, Path]]:
     """Select visible MOP targets and build Rubin coverage products.
@@ -761,6 +769,20 @@ def run_target_selection(
             sort_by_mag=False,
         )
         daily.to_csv(daily_path, index=False)
+
+    if generate_visibility_plots:
+        from visibility_plotter import save_nightly_visibility_plots
+        if verbose:
+            print("      Nightly visibility plots", flush=True)
+        save_nightly_visibility_plots(
+            daily, start_date, end_date, paths["visibility_plots"],
+            observatory=observatory, minimum_altitude=visibility_minimum_altitude,
+            minimum_peak_altitude=visibility_minimum_peak_altitude,
+            minimum_night_fraction=visibility_minimum_night_fraction,
+            selection_rule=visibility_selection_rule,
+            time_step_minutes=visibility_time_step_minutes,
+            overwrite=overwrite_visibility_plots, verbose=verbose,
+        )
 
     if verbose:
         print("[2/5] MOP parameters + photometry" + (" (cache)" if cache_valid else ""), flush=True)
@@ -853,6 +875,13 @@ def run_target_selection(
         "sky_marker_encoding": sky_marker_encoding,
         "show_coverage_background": bool(show_coverage_background),
         "coverage_resolution": int(coverage_resolution),
+        "generate_visibility_plots": bool(generate_visibility_plots),
+        "overwrite_visibility_plots": bool(overwrite_visibility_plots),
+        "visibility_minimum_altitude": float(visibility_minimum_altitude),
+        "visibility_minimum_peak_altitude": float(visibility_minimum_peak_altitude),
+        "visibility_minimum_night_fraction": float(visibility_minimum_night_fraction),
+        "visibility_selection_rule": visibility_selection_rule,
+        "visibility_time_step_minutes": int(visibility_time_step_minutes),
     }
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if verbose:
