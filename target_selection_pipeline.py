@@ -717,11 +717,9 @@ def run_target_selection(
     coverage_resolution: int = 19,
     generate_visibility_plots: bool = True,
     overwrite_visibility_plots: bool = False,
-    visibility_minimum_altitude: float = 30.0,
-    visibility_minimum_peak_altitude: float = 50.0,
-    visibility_minimum_night_fraction: float = 0.50,
-    visibility_selection_rule: str = "all",
-    visibility_time_step_minutes: int = 10,
+    visibility_minimum_altitude: float = 40.0,
+    visibility_minimum_observable_minutes: float = 90.0,
+    visibility_time_step_minutes: int = 1,
     verbose: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, Path]]:
     """Select visible MOP targets and build Rubin coverage products.
@@ -777,9 +775,7 @@ def run_target_selection(
         save_nightly_visibility_plots(
             daily, start_date, end_date, paths["visibility_plots"],
             observatory=observatory, minimum_altitude=visibility_minimum_altitude,
-            minimum_peak_altitude=visibility_minimum_peak_altitude,
-            minimum_night_fraction=visibility_minimum_night_fraction,
-            selection_rule=visibility_selection_rule,
+            minimum_observable_minutes=visibility_minimum_observable_minutes,
             time_step_minutes=visibility_time_step_minutes,
             overwrite=overwrite_visibility_plots, verbose=verbose,
         )
@@ -878,9 +874,7 @@ def run_target_selection(
         "generate_visibility_plots": bool(generate_visibility_plots),
         "overwrite_visibility_plots": bool(overwrite_visibility_plots),
         "visibility_minimum_altitude": float(visibility_minimum_altitude),
-        "visibility_minimum_peak_altitude": float(visibility_minimum_peak_altitude),
-        "visibility_minimum_night_fraction": float(visibility_minimum_night_fraction),
-        "visibility_selection_rule": visibility_selection_rule,
+        "visibility_minimum_observable_minutes": float(visibility_minimum_observable_minutes),
         "visibility_time_step_minutes": int(visibility_time_step_minutes),
     }
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

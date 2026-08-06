@@ -54,11 +54,9 @@ Restart the kernel and select **Run All**. The main function is `run_target_sele
 - `show_coverage_background=True`: query and display a muted, low-resolution visit-density layer for the selected Data Release.
 - `coverage_resolution=19`: control the coarse background grid; 19 approximately matches one LSSTCam field of view per cell.
 - `generate_visibility_plots=True`: create one local visibility plot per requested night.
-- `visibility_minimum_altitude=30`: altitude used to count observable astronomical-night time.
-- `visibility_minimum_peak_altitude=50`: minimum peak altitude reached during astronomical night.
-- `visibility_minimum_night_fraction=0.50`: minimum fraction of astronomical night above the altitude threshold.
-- `visibility_selection_rule="all"`: require both criteria; use `"either"` to accept either criterion.
-- `visibility_time_step_minutes=10`: temporal sampling of visibility curves.
+- `visibility_minimum_altitude=40`: minimum altitude, approximately equivalent to airmass below 1.5.
+- `visibility_minimum_observable_minutes=90`: required time above the altitude threshold during astronomical night.
+- `visibility_time_step_minutes=1`: temporal sampling of visibility curves.
 - `overwrite_visibility_plots=False`: reuse existing nightly PNG files.
 
 The release-wide visit-center query is executed only when the background is enabled. Its result is cached as `release_visit_centers.csv`, so later runs do not query the complete release again. The layer is an approximate visualization of total visit density, not an exact detector-footprint map.
@@ -94,9 +92,7 @@ save_selected_visibility_plots(selected_for_all_nights, "final_visibility_plots"
 plot_visibility_sequence(
     selected_for_all_nights,
     "visibility_sequence.pdf",
-    minimum_peak_altitude=50,
-    minimum_night_fraction=.50,
-    selection_rule="all",
+    minimum_observable_minutes=90,
     x_reference_every=4,
 )
 ```

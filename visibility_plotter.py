@@ -60,7 +60,7 @@ def evaluate_nightly_visibility(
     *,
     observatory: str | dict = "El Leoncito",
     minimum_altitude: float = 30.0,
-    time_step_minutes: int = 10,
+    time_step_minutes: int = 1,
 ) -> pd.DataFrame:
     """Add per-target visibility metrics for one astronomical night."""
     if time_step_minutes < 1:
@@ -105,38 +105,28 @@ def select_nightly_targets(
     night: str | date,
     *,
     observatory: str | dict = "El Leoncito",
-    minimum_altitude: float = 30.0,
-    minimum_peak_altitude: float = 50.0,
-    minimum_night_fraction: float = 0.50,
-    selection_rule: str = "all",
-    time_step_minutes: int = 10,
+    minimum_altitude: float = 40.0,
+    minimum_observable_minutes: float = 90.0,
+    time_step_minutes: int = 1,
     return_all: bool = False,
 ) -> pd.DataFrame:
-    """Select the most visible targets using configurable absolute criteria."""
-    if not 0 <= minimum_night_fraction <= 1:
-        raise ValueError("minimum_night_fraction must be between 0 and 1.")
-    if selection_rule not in {"all", "either"}:
-        raise ValueError("selection_rule must be 'all' or 'either'.")
+    """Select targets observable above a minimum altitude for a minimum time."""
+    if minimum_observable_minutes <= 0:
+        raise ValueError("minimum_observable_minutes must be positive.")
     evaluated = evaluate_nightly_visibility(
         targets, night, observatory=observatory, minimum_altitude=minimum_altitude,
         time_step_minutes=time_step_minutes,
     )
-    passes_peak = evaluated["peak_altitude_deg"].ge(minimum_peak_altitude)
-    passes_fraction = evaluated["observable_night_fraction"].ge(minimum_night_fraction)
-    selected = passes_peak & passes_fraction if selection_rule == "all" else passes_peak | passes_fraction
+    selected = evaluated["observable_minutes"].ge(minimum_observable_minutes)
     evaluated["selected_for_visibility"] = selected
-
-    reasons = []
-    for peak_ok, fraction_ok in zip(passes_peak, passes_fraction):
-        failed = []
-        if not peak_ok:
-            failed.append("peak altitude below threshold")
-        if not fraction_ok:
-            failed.append("observable night fraction below threshold")
-        reasons.append("; ".join(failed))
-    evaluated["visibility_rejection_reasons"] = reasons
+    evaluated["visibility_rejection_reasons"] = np.where(
+        selected,
+        "",
+        f"fewer than {minimum_observable_minutes:g} observable minutes above "
+        f"{minimum_altitude:g} degrees",
+    )
     evaluated = evaluated.sort_values(
-        ["selected_for_visibility", "observable_night_fraction", "peak_altitude_deg"],
+        ["selected_for_visibility", "observable_minutes", "peak_altitude_deg"],
         ascending=[False, False, False],
     )
     return evaluated if return_all else evaluated.loc[evaluated["selected_for_visibility"]].copy()
@@ -148,8 +138,8 @@ def plot_nightly_visibility(
     output_path: str | Path,
     *,
     observatory: str | dict = "El Leoncito",
-    minimum_altitude: float = 20.0,
-    time_step_minutes: int = 10,
+    minimum_altitude: float = 40.0,
+    time_step_minutes: int = 1,
 ) -> None:
     """Plot altitude, airmass, twilight, and Moon altitude for one night."""
     if time_step_minutes < 1:
@@ -210,7 +200,7 @@ def plot_nightly_visibility(
     ax.xaxis.set_major_locator(mdates.HourLocator(interval=1, tz=timezone))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=timezone))
     ax.xaxis.set_minor_locator(mdates.MinuteLocator(byminute=[0, 15, 30, 45], tz=timezone))
-    ax.tick_params(axis="x", rotation=30)
+    ax.tick_params(axis="x")
 
     airmass_axis = ax.twinx()
     altitude_ticks = np.array([90, 60, 45, 30, 20], dtype=float)
@@ -279,11 +269,9 @@ def plot_visibility_sequence(
     *,
     date_column: str = "observation_date",
     observatory: str | dict = "El Leoncito",
-    minimum_altitude: float = 30.0,
-    minimum_peak_altitude: float | None = None,
-    minimum_night_fraction: float | None = None,
-    selection_rule: str | None = None,
-    time_step_minutes: int = 10,
+    minimum_altitude: float = 40.0,
+    minimum_observable_minutes: float | None = None,
+    time_step_minutes: int = 1,
     x_reference_every: int = 4,
     output_format: str | None = None,
 ) -> Path:
@@ -371,18 +359,23 @@ def plot_visibility_sequence(
             bbox={"boxstyle": "round,pad=.25", "facecolor": "white",
                   "edgecolor": ".35", "alpha": .9},
         )
-        show_reference = panel_index % x_reference_every == 0 or panel_index == len(nights) - 1
-        ax.tick_params(axis="x", which="both", labelbottom=show_reference)
-        if show_reference:
-            ax.set_xlabel(f"Local time [{timezone.key}]")
-
     major_ticks = np.arange(0, 13, 1)
     minor_ticks = np.arange(0, 12.01, .25)
     major_labels = [f"{(18 + hour) % 24:02d}:00" for hour in major_ticks]
-    for ax in axes:
+    for panel_index, ax in enumerate(axes):
+        show_reference = panel_index % x_reference_every == 0 or panel_index == len(nights) - 1
         ax.set_xticks(major_ticks)
         ax.set_xticks(minor_ticks, minor=True)
-        ax.set_xticklabels(major_labels, rotation=30)
+        ax.set_xticklabels(major_labels, ha="right")
+        ax.xaxis.set_ticks_position("bottom")
+        ax.tick_params(
+            axis="x", which="major", labelbottom=show_reference,
+            labelsize=8, pad=3, length=3,
+        )
+        ax.tick_params(axis="x", which="minor", length=2)
+        if show_reference:
+            for label in ax.get_xticklabels(which="major"):
+                label.set_visible(True)
 
     target_handles = [
         Line2D([0], [0], color=target_colors[name], lw=1.4, label=name)
@@ -398,27 +391,27 @@ def plot_visibility_sequence(
         for color, label in zip(twilight_colors, twilight_labels)
     ]
     handles = target_handles + reference_handles + twilight_handles
-    legend_columns = min(8, max(4, int(np.ceil(len(handles) / 7))))
+    legend_columns = min(10, max(5, int(np.ceil(len(handles) / 6))))
     fig.legend(
         handles=handles, loc="lower center", ncol=legend_columns,
-        fontsize=7, frameon=False, bbox_to_anchor=(.5, .005),
+        fontsize=6.5, frameon=False, bbox_to_anchor=(.5, .002),
     )
     legend_rows = np.ceil(len(handles) / legend_columns)
-    fig.suptitle(f"Selected-target visibility — {observatory_name}", y=.997, fontsize=13)
-    if minimum_peak_altitude is not None and minimum_night_fraction is not None:
-        rule_label = "both criteria required" if selection_rule == "all" else "either criterion required"
+    fig.suptitle(f"Selected-target visibility — {observatory_name}", y=.998, fontsize=13)
+    if minimum_observable_minutes is not None:
         criteria = (
-            "Selection criteria: "
-            f"peak altitude ≥ {minimum_peak_altitude:g}°; "
-            f"≥ {100 * minimum_night_fraction:g}% of astronomical night "
-            f"at altitude ≥ {minimum_altitude:g}°; {rule_label}."
+            f"1. At least {minimum_observable_minutes / 60:g} hours during astronomical night "
+            f"at altitude ≥ {minimum_altitude:g}° (approximately airmass < 1.5)."
         )
     else:
-        criteria = "Selection criteria: observer-supplied final target list."
-    fig.text(.5, .979, criteria, ha="center", va="top", fontsize=8.5)
+        criteria = "1. Targets were supplied as an observer-approved final selection."
+    fig.text(
+        .5, .979, criteria, ha="center", va="top", fontsize=12, linespacing=1.2,
+        bbox={"boxstyle": "round,pad=.30", "facecolor": "white", "edgecolor": ".45", "alpha": .94},
+    )
     fig.subplots_adjust(
-        top=.963, bottom=min(.22, .035 + .018 * legend_rows),
-        left=.065, right=.99, hspace=.12,
+        top=.956, bottom=min(.15, .018 + .014 * legend_rows),
+        left=.065, right=.99, hspace=.17,
     )
     fig.savefig(
         output_path, format=output_format, dpi=170,
@@ -434,11 +427,9 @@ def save_nightly_visibility_plots(
     output_dir: str | Path,
     *,
     observatory: str | dict = "El Leoncito",
-    minimum_altitude: float = 30.0,
-    minimum_peak_altitude: float = 50.0,
-    minimum_night_fraction: float = 0.50,
-    selection_rule: str = "all",
-    time_step_minutes: int = 10,
+    minimum_altitude: float = 40.0,
+    minimum_observable_minutes: float = 90.0,
+    time_step_minutes: int = 1,
     overwrite: bool = False,
     verbose: bool = True,
 ) -> list[Path]:
@@ -459,9 +450,8 @@ def save_nightly_visibility_plots(
         evaluated = select_nightly_targets(
             nightly_targets, night_string, observatory=observatory,
             minimum_altitude=minimum_altitude,
-            minimum_peak_altitude=minimum_peak_altitude,
-            minimum_night_fraction=minimum_night_fraction,
-            selection_rule=selection_rule, time_step_minutes=time_step_minutes,
+            minimum_observable_minutes=minimum_observable_minutes,
+            time_step_minutes=time_step_minutes,
             return_all=True,
         )
         evaluated.insert(0, "observation_date", night_string) if "observation_date" not in evaluated else None

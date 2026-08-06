@@ -55,20 +55,20 @@ def test_visibility_metrics_and_configurable_selection():
     )
     assert {"peak_altitude_deg", "observable_night_fraction", "observable_minutes"} <= set(evaluated)
     selected = select_nightly_targets(
-        targets, "2026-08-01", minimum_altitude=30, minimum_peak_altitude=40,
-        minimum_night_fraction=.25, time_step_minutes=30,
+        targets, "2026-08-01", minimum_altitude=40,
+        minimum_observable_minutes=90, time_step_minutes=30,
     )
     assert selected["Target"].tolist() == ["Bulge"]
 
 
-def test_selection_rule_validation():
+def test_observable_minutes_validation():
     targets = pd.DataFrame({"Target": ["A"], "RA_deg": [266.4], "Dec_deg": [-29.0]})
     try:
-        select_nightly_targets(targets, "2026-08-01", selection_rule="invalid")
+        select_nightly_targets(targets, "2026-08-01", minimum_observable_minutes=0)
     except ValueError as error:
-        assert "selection_rule" in str(error)
+        assert "minimum_observable_minutes" in str(error)
     else:
-        raise AssertionError("Invalid selection rule was accepted")
+        raise AssertionError("Zero observable minutes were accepted")
 
 
 def test_save_final_selected_plots(tmp_path):

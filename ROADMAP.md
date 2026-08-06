@@ -23,8 +23,8 @@ selected = select_nightly_targets(
     targets,
     night="2026-08-05",
     telescope="JS",
-    minimum_altitude=30,
-    minimum_observable_minutes=60,
+    minimum_altitude=40,
+    minimum_observable_minutes=90,
     maximum_airmass=2.0,
     minimum_moon_separation=30,
 )
