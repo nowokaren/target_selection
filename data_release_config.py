@@ -23,6 +23,13 @@ class DataReleaseConfig:
     visit_columns: Mapping[str, str]
     coadd_dataset_types: tuple[str, ...]
     coadd_spatial_where: str
+    calexp_dataset_types: tuple[str, ...] = ("calexp",)
+    calexp_data_id_keys: Mapping[str, str] = field(
+        default_factory=lambda: {"visitId": "visit", "detector": "detector"}
+    )
+    photometry_method: str = "calexp_forced"
+    tap_dia_object_table: str | None = None
+    tap_dia_forced_source_table: str | None = None
     notes: str = ""
 
     def visit_select(self, alias: str = "vd") -> str:
@@ -33,6 +40,13 @@ class DataReleaseConfig:
         return ", ".join(
             f"{alias}.{self.visit_columns[name]} AS {name}" for name in required
         )
+
+    def calexp_data_id(self, visit_id: int, detector: int) -> dict[str, int]:
+        """Return the Butler data ID for one calibrated single-detector exposure."""
+        return {
+            self.calexp_data_id_keys["visitId"]: int(visit_id),
+            self.calexp_data_id_keys["detector"]: int(detector),
+        }
 
     @property
     def tap_ra(self) -> str:
@@ -83,6 +97,11 @@ RELEASES: dict[str, DataReleaseConfig] = {
         butler_collections="dp2", tap_visit_table="dp2.VisitDetector",
         visit_columns=_DP2_COLUMNS, coadd_dataset_types=("deep_coadd",),
         coadd_spatial_where="patch.region OVERLAPS POINT(:ra,:dec)",
+        photometry_method="coadd_forced",
+        tap_dia_object_table="dp2.DiaObject",
+        tap_dia_forced_source_table="dp2.ForcedSourceOnDiaObject",
+        notes=("Early DP2 publishes deep coadds but not calibrated individual visit images; "
+               "target photometry is therefore measured on the coadds."),
     ),
 }
 

@@ -3,6 +3,7 @@ import pandas as pd
 from visibility_plotter import (
     evaluate_nightly_visibility,
     get_observatory,
+    observing_window_mask,
     plot_nightly_visibility,
     plot_visibility_sequence,
     save_nightly_visibility_plots,
@@ -60,6 +61,49 @@ def test_visibility_metrics_and_configurable_selection():
     )
     assert selected["Target"].tolist() == ["Bulge"]
 
+
+
+def test_allocated_observing_windows_limit_metrics_and_support_overrides():
+    targets = pd.DataFrame({
+        "Target": ["Bulge"], "RA_deg": [266.4], "Dec_deg": [-29.0],
+    })
+    full = evaluate_nightly_visibility(
+        targets, "2026-08-01", minimum_altitude=30, time_step_minutes=30,
+    )
+    unavailable = evaluate_nightly_visibility(
+        targets, "2026-08-01", minimum_altitude=30, time_step_minutes=30,
+        observing_windows={"default": []},
+    )
+    assert full.loc[0, "allocated_astronomical_minutes"] > 0
+    assert unavailable.loc[0, "allocated_astronomical_minutes"] == 0
+    assert unavailable.loc[0, "observable_minutes"] == 0
+    assert unavailable.loc[0, "observing_windows"] == "none"
+
+    _, timezone, _ = get_observatory("El Leoncito")
+    local_times = pd.date_range("2026-08-01 18:00", periods=25, freq="30min", tz=timezone)
+    mask, windows = observing_window_mask(
+        local_times, "2026-08-01", timezone,
+        {"default": ("20:00", "02:00"), "2026-08-01": [("21:00", "23:00")]},
+    )
+    assert windows == [("21:00", "23:00")]
+    assert mask.sum() == 5
+
+
+def test_partial_night_plots_are_regenerated_when_schedule_changes(tmp_path):
+    daily = pd.DataFrame({
+        "observation_date": ["2026-08-01"],
+        "Target": ["A"], "RA_deg": [266.4], "Dec_deg": [-29.0],
+    })
+    paths = save_nightly_visibility_plots(
+        daily, "2026-08-01", "2026-08-01", tmp_path,
+        time_step_minutes=60, observing_windows=("20:00", "02:00"), verbose=False,
+    )
+    first_mtime = paths[0].stat().st_mtime_ns
+    save_nightly_visibility_plots(
+        daily, "2026-08-01", "2026-08-01", tmp_path,
+        time_step_minutes=60, observing_windows=("21:00", "02:00"), verbose=False,
+    )
+    assert paths[0].stat().st_mtime_ns > first_mtime
 
 def test_observable_minutes_validation():
     targets = pd.DataFrame({"Target": ["A"], "RA_deg": [266.4], "Dec_deg": [-29.0]})

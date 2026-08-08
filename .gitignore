@@ -8,3 +8,5 @@ __pycache__/
 build/
 dist/
 .pytest_cache/
+# Local observatory image metadata; keep survey data outside Git.
+hsh_data/
