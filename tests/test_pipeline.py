@@ -225,8 +225,10 @@ def test_target_report_cache_remembers_no_coadd_results(tmp_path):
 class _FakeMop:
     def visible_targets(self, **kwargs):
         return pd.DataFrame({
-            "Target": ["visible-event"], "RA_deg": [10.0], "Dec_deg": [-20.0],
-            "mag_now": [18.0], "observation_date": ["2026-08-01"],
+            "Target": ["visible-event", "invalid-zero-magnitude"],
+            "RA_deg": [10.0, 11.0], "Dec_deg": [-20.0, -21.0],
+            "mag_now": [18.0, 0.0],
+            "observation_date": ["2026-08-01", "2026-08-01"],
         })
 
     def visibility_summary(self, *, daily_targets, **kwargs):
@@ -267,13 +269,19 @@ def test_pipeline_queries_visible_and_previously_observed_targets(tmp_path):
     )
 
     assert set(combined["Target"]) == {"visible-event", "OGLE-2025-BLG-0001", "manual-event"}
+    assert "invalid-zero-magnitude" not in set(combined["Target"])
+    assert "invalid-zero-magnitude" not in set(pd.read_csv(paths["tables"] / "visible_targets_daily.csv")["Target"])
     assert combined.set_index("Target").loc["OGLE-2025-BLG-0001", "is_previously_observed"]
     assert (paths["tables"] / "analysis_targets.csv").exists()
     visibility_summary = pd.read_csv(paths["tables"] / "visibility_target_summary.csv")
-    assert {"Target", "passes_visibility_filter", "max_observable_minutes"} <= set(visibility_summary)
+    assert {"Target", "mag_now", "passes_visibility_filter", "max_observable_minutes"} <= set(visibility_summary)
     assert set(visibility_summary["Target"]) == {"visible-event", "OGLE-2025-BLG-0001", "manual-event"}
+    assert visibility_summary.set_index("Target").loc["visible-event", "mag_now"] == 18.0
     queried = pd.read_csv(paths["tables"] / "queried_targets.csv")
     assert set(queried["Target"]) == {"visible-event", "OGLE-2025-BLG-0001", "manual-event"}
     assert set(queried["query_source"]) == {"MOP visible", "Previously observed", "User supplied"}
     assert queried.set_index("Target").loc["manual-event", "is_user_supplied"]
     assert (paths["tables"] / "coverage_targets.csv").exists()
+    observing_summary = pd.read_csv(paths["tables"] / "observing_selection_summary.csv")
+    assert {"Target", "mag_now", "visible_hours", "visible_from", "visible_to"} <= set(observing_summary)
+    assert (paths["tables"] / "observing_selection_summary.png").exists()

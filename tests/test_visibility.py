@@ -4,6 +4,7 @@ from visibility_plotter import (
     evaluate_nightly_visibility,
     get_observatory,
     observing_window_mask,
+    _visibility_target_label,
     plot_nightly_visibility,
     plot_visibility_sequence,
     save_nightly_visibility_plots,
@@ -54,7 +55,7 @@ def test_visibility_metrics_and_configurable_selection():
     evaluated = evaluate_nightly_visibility(
         targets, "2026-08-01", minimum_altitude=30, time_step_minutes=30,
     )
-    assert {"peak_altitude_deg", "observable_night_fraction", "observable_minutes"} <= set(evaluated)
+    assert {"peak_altitude_deg", "observable_night_fraction", "observable_minutes", "observable_start_local", "observable_end_local"} <= set(evaluated)
     selected = select_nightly_targets(
         targets, "2026-08-01", minimum_altitude=40,
         minimum_observable_minutes=90, time_step_minutes=30,
@@ -145,3 +146,8 @@ def test_plot_visibility_sequence_pdf_and_format_override(tmp_path):
     )
     assert png_path.suffix == ".png"
     assert png_path.exists() and png_path.stat().st_size > 0
+
+
+def test_visibility_legend_label_includes_hours_and_current_magnitude():
+    row = pd.Series({"Target": "event", "mag_now": 18.37})
+    assert _visibility_target_label(row, 125) == "event (2.1 h, mag=18.4)"

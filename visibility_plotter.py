@@ -19,7 +19,7 @@ from astropy.time import Time
 from astropy.utils import iers
 
 
-VISIBILITY_PLOT_VERSION = 3
+VISIBILITY_PLOT_VERSION = 5
 
 
 OBSERVATORIES = {
@@ -56,10 +56,21 @@ def _night_times(
     timezone: ZoneInfo,
     step_minutes: int,
     observing_windows=None,
+    location: EarthLocation | None = None,
 ) -> tuple[pd.DatetimeIndex, Time]:
-    """Return an evening-to-dawn grid, extended for later allocated time."""
+    """Return a civil-twilight-to-dawn grid, extended for later assigned time."""
     night_date = pd.Timestamp(night).date()
-    start = pd.Timestamp(f"{night_date} 18:00", tz=timezone)
+    fallback_start = pd.Timestamp(f"{night_date} 18:00", tz=timezone)
+    if location is None:
+        start = fallback_start
+    else:
+        search_start = pd.Timestamp(f"{night_date} 12:00", tz=timezone)
+        preview_times = pd.date_range(search_start, fallback_start, freq="5min")
+        preview_time = Time(preview_times.to_pydatetime())
+        preview_frame = AltAz(obstime=preview_time, location=location)
+        sun_altitude = get_body("sun", preview_time, location=location).transform_to(preview_frame).alt.degree
+        twilight = np.flatnonzero(sun_altitude < 0)
+        start = preview_times[int(twilight[0])] if len(twilight) else fallback_start
     default_end = pd.Timestamp(night_date, tz=timezone) + pd.Timedelta(days=1, hours=7)
     allocated_ends = []
     for _, end_clock in resolve_observing_windows(night, observing_windows):
@@ -70,6 +81,19 @@ def _night_times(
     end = max([default_end, *allocated_ends])
     local_times = pd.date_range(start, end, freq=f"{step_minutes}min")
     return local_times, Time(local_times.to_pydatetime())
+
+
+def _visibility_target_label(row: pd.Series, observable_minutes: float | None = None) -> str:
+    """Format one target legend label with observable time and current MOP magnitude."""
+    name = str(row.get("Target", "Target"))
+    minutes = pd.to_numeric(
+        row.get("observable_minutes", np.nan) if observable_minutes is None else observable_minutes,
+        errors="coerce",
+    )
+    magnitude = pd.to_numeric(row.get("mag_now", np.nan), errors="coerce")
+    hours_text = f"{float(minutes) / 60:.1f} h" if pd.notna(minutes) else "hours unavailable"
+    magnitude_text = f"mag={float(magnitude):.1f}" if pd.notna(magnitude) else "mag=—"
+    return f"{name} ({hours_text}, {magnitude_text})"
 
 
 def _window_pairs(value) -> list[tuple[str, str]]:
@@ -153,7 +177,7 @@ def evaluate_nightly_visibility(
         raise ValueError("time_step_minutes must be positive.")
     location, timezone, _ = get_observatory(observatory)
     local_times, times = _night_times(
-        night, timezone, time_step_minutes, observing_windows,
+        night, timezone, time_step_minutes, observing_windows, location=location,
     )
     allocated_time, windows = observing_window_mask(
         local_times, night, timezone, observing_windows,
@@ -171,24 +195,34 @@ def evaluate_nightly_visibility(
     peak_altitudes = []
     night_fractions = []
     observable_minutes = []
+    observable_starts = []
+    observable_ends = []
+    eligible_times = local_times[eligible_time]
     for _, row in evaluated.iterrows():
         if pd.isna(row.get("RA_deg")) or pd.isna(row.get("Dec_deg")) or night_samples == 0:
             peak_altitudes.append(np.nan)
             night_fractions.append(0.0)
             observable_minutes.append(0.0)
+            observable_starts.append("")
+            observable_ends.append("")
             continue
         coord = SkyCoord(float(row["RA_deg"]) * u.deg, float(row["Dec_deg"]) * u.deg)
         altitude = coord.transform_to(frame).alt.degree
         night_altitude = altitude[eligible_time]
         visible = night_altitude >= minimum_altitude
+        visible_times = eligible_times[visible]
         peak_altitudes.append(float(np.nanmax(night_altitude)))
         night_fractions.append(float(visible.mean()))
         observable_minutes.append(float(visible.sum() * time_step_minutes))
+        observable_starts.append(visible_times[0].strftime("%H:%M") if len(visible_times) else "")
+        observable_ends.append(visible_times[-1].strftime("%H:%M") if len(visible_times) else "")
 
     evaluated["peak_altitude_deg"] = peak_altitudes
     evaluated["observable_night_fraction"] = night_fractions
     evaluated["observable_night_percent"] = 100 * evaluated["observable_night_fraction"]
     evaluated["observable_minutes"] = observable_minutes
+    evaluated["observable_start_local"] = observable_starts
+    evaluated["observable_end_local"] = observable_ends
     evaluated["allocated_astronomical_minutes"] = float(night_samples * time_step_minutes)
     evaluated["observing_windows"] = _window_label(windows)
     return evaluated
@@ -242,7 +276,7 @@ def plot_nightly_visibility(
         raise ValueError("time_step_minutes must be positive.")
     location, timezone, observatory_name = get_observatory(observatory)
     local_times, times = _night_times(
-        night, timezone, time_step_minutes, observing_windows,
+        night, timezone, time_step_minutes, observing_windows, location=location,
     )
     allocated_time, windows = observing_window_mask(
         local_times, night, timezone, observing_windows,
@@ -251,6 +285,7 @@ def plot_nightly_visibility(
     frame = AltAz(obstime=times, location=location)
     sun = get_body("sun", times, location=location)
     sun_altitude = sun.transform_to(frame).alt.degree
+    eligible_time = (sun_altitude < -18) & allocated_time
     moon = get_body("moon", times, location=location)
     moon_altitude = moon.transform_to(frame).alt.degree
     elongation = sun.separation(moon).radian
@@ -289,8 +324,11 @@ def plot_nightly_visibility(
         line_style = line_styles[(target_index // len(palette)) % len(line_styles)]
         coord = SkyCoord(float(row["RA_deg"]) * u.deg, float(row["Dec_deg"]) * u.deg)
         altitude = coord.transform_to(frame).alt.degree
+        observable_minutes = pd.to_numeric(row.get("observable_minutes"), errors="coerce")
+        if pd.isna(observable_minutes):
+            observable_minutes = float(((altitude >= minimum_altitude) & eligible_time).sum() * time_step_minutes)
         ax.plot(local_times, altitude, lw=1.35, ls=line_style, color=color,
-                label=str(row.get("Target", "Target")), zorder=3)
+                label=_visibility_target_label(row, observable_minutes), zorder=3)
 
     ax.plot(local_times, moon_altitude, color="0.25", lw=1.4, ls="--",
             label=f"Moon ({moon_illumination:.0f}% illuminated)", zorder=2)
@@ -422,11 +460,15 @@ def plot_visibility_sequence(
     palette = palette[np.r_[np.arange(0, 60, 2), np.arange(1, 60, 2)]]
     target_colors = {name: palette[index % len(palette)] for index, name in enumerate(target_names)}
 
+    timelines = [
+        _night_times(night, timezone, time_step_minutes, observing_windows, location=location)[0]
+        for night in nights
+    ]
     sequence_hours = max(
         float((timeline[-1] - timeline[0]).total_seconds() / 3600)
-        for night in nights
-        for timeline, _ in [_night_times(night, timezone, time_step_minutes, observing_windows)]
+        for timeline in timelines
     )
+    reference_start = timelines[0][0]
     fig, axes = plt.subplots(
         len(nights), 1, figsize=(16, max(4.5, 2.25 * len(nights))),
         sharex=True, squeeze=False,
@@ -440,7 +482,7 @@ def plot_visibility_sequence(
 
     for panel_index, (ax, night) in enumerate(zip(axes, nights)):
         local_times, times = _night_times(
-            night, timezone, time_step_minutes, observing_windows,
+            night, timezone, time_step_minutes, observing_windows, location=location,
         )
         allocated_time, _ = observing_window_mask(
             local_times, night, timezone, observing_windows,
@@ -490,7 +532,10 @@ def plot_visibility_sequence(
         )
     major_ticks = np.arange(0, int(np.floor(sequence_hours)) + 1, 1)
     minor_ticks = np.arange(0, sequence_hours + .001, .25)
-    major_labels = [f"{(18 + hour) % 24:02d}:00" for hour in major_ticks]
+    major_labels = [
+        (reference_start + pd.Timedelta(hours=float(hour))).strftime("%H:%M")
+        for hour in major_ticks
+    ]
     for panel_index, ax in enumerate(axes):
         show_reference = panel_index % x_reference_every == 0 or panel_index == len(nights) - 1
         ax.set_xticks(major_ticks)
@@ -506,10 +551,20 @@ def plot_visibility_sequence(
             for label in ax.get_xticklabels(which="major"):
                 label.set_visible(True)
 
-    target_handles = [
-        Line2D([0], [0], color=target_colors[name], lw=1.4, label=name)
-        for name in target_names
-    ]
+    target_handles = []
+    for name in target_names:
+        target_rows = data.loc[data["Target"].astype(str).eq(name)]
+        target_row = target_rows.iloc[0]
+        hours = (
+            pd.to_numeric(target_rows["observable_minutes"], errors="coerce").max()
+            if "observable_minutes" in target_rows else np.nan
+        )
+        target_handles.append(
+            Line2D(
+                [0], [0], color=target_colors[name], lw=1.4,
+                label=_visibility_target_label(target_row, hours),
+            )
+        )
     reference_handles = [
         Line2D([0], [0], color="0.25", lw=1.1, ls="--", label="Moon"),
         Line2D([0], [0], color="firebrick", lw=.9, ls=":",
@@ -586,9 +641,10 @@ def build_visibility_selection(
 def summarize_visibility_selection(selection: pd.DataFrame) -> pd.DataFrame:
     """Summarize nightly pass/fail visibility decisions once per target."""
     columns = [
-        "Target", "visibility_nights_evaluated", "visibility_nights_selected",
+        "Target", "mag_now", "visibility_nights_evaluated", "visibility_nights_selected",
         "passes_visibility_filter", "max_peak_altitude_deg", "max_observable_minutes",
-        "max_observable_night_percent", "observing_windows", "best_rejection_reason",
+        "max_observable_night_percent", "best_observation_date", "best_observable_start_local",
+        "best_observable_end_local", "observing_windows", "best_rejection_reason",
     ]
     if selection.empty or "Target" not in selection:
         return pd.DataFrame(columns=columns)
@@ -606,6 +662,20 @@ def summarize_visibility_selection(selection: pd.DataFrame) -> pd.DataFrame:
         max_observable_night_percent=("observable_night_percent", "max"),
         observing_windows=("observing_windows", "first"),
     ).reset_index()
+    if "mag_now" in data:
+        magnitudes = data.groupby("Target", sort=False)["mag_now"].first()
+        summary["mag_now"] = summary["Target"].map(magnitudes)
+    else:
+        summary["mag_now"] = np.nan
+    best_rows = data.loc[
+        data.groupby("Target", sort=False)["observable_minutes"].idxmax(),
+        ["Target", "observation_date", "observable_start_local", "observable_end_local"],
+    ].rename(columns={
+        "observation_date": "best_observation_date",
+        "observable_start_local": "best_observable_start_local",
+        "observable_end_local": "best_observable_end_local",
+    })
+    summary = summary.merge(best_rows, on="Target", how="left")
     summary["passes_visibility_filter"] = summary["visibility_nights_selected"].gt(0)
     rejected = data.loc[~data["_selected"], ["Target", "visibility_rejection_reasons"]]
     reasons = rejected.groupby("Target", sort=False)["visibility_rejection_reasons"].first()

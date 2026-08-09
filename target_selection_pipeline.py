@@ -60,6 +60,15 @@ def _load_additional_targets(targets: pd.DataFrame | str | Path | None) -> pd.Da
     ].drop_duplicates("Target", keep="first").reset_index(drop=True)
 
 
+def _filter_invalid_mop_magnitudes(targets: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Discard MOP candidates whose current magnitude is the invalid zero value."""
+    if targets.empty or "mag_now" not in targets:
+        return targets.copy(), 0
+    magnitude = pd.to_numeric(targets["mag_now"], errors="coerce")
+    invalid = magnitude.notna() & magnitude.le(0)
+    return targets.loc[~invalid].copy().reset_index(drop=True), int(invalid.sum())
+
+
 def _visibility_daily_targets(
     targets: pd.DataFrame, start_date: str, end_date: str, *, scope: str,
     mop_daily: pd.DataFrame,
@@ -69,7 +78,10 @@ def _visibility_daily_targets(
         return mop_daily.copy()
     if scope != "all_queried":
         raise ValueError("visibility_target_scope must be 'all_queried' or 'mop_daily'.")
-    base = targets[["Target", "RA_deg", "Dec_deg"]].dropna().drop_duplicates("Target")
+    columns = ["Target", "RA_deg", "Dec_deg"]
+    if "mag_now" in targets:
+        columns.append("mag_now")
+    base = targets[columns].dropna(subset=["Target", "RA_deg", "Dec_deg"]).drop_duplicates("Target")
     nights = pd.date_range(start_date, end_date, freq="D").strftime("%Y-%m-%d")
     if base.empty or len(nights) == 0:
         return pd.DataFrame(columns=["Target", "RA_deg", "Dec_deg", "observation_date"])
@@ -943,6 +955,7 @@ def run_target_selection(
     release_photometry_targets: Iterable[str] | None = None,
     overwrite_release_photometry: bool = False,
     hsh_image_catalog: str | Path | None = None,
+    refresh_hsh_data: bool = False,
     hsh_peak_half_width_t_e: float = 0.3,
     hsh_event_half_width_t_e: float = 2.0,
     include_previously_observed: bool = True,
@@ -997,7 +1010,7 @@ def run_target_selection(
     )
     registry = TargetRegistry(registry_path)
     if hsh_image_catalog is not None:
-        imported_hsh = registry.import_hsh_catalog(hsh_image_catalog)
+        imported_hsh = registry.import_hsh_catalog(hsh_image_catalog, force=refresh_hsh_data)
         if verbose and imported_hsh:
             print(f"      Imported {imported_hsh} HSH astrometry records", flush=True)
     observed_targets = (
@@ -1024,7 +1037,10 @@ def run_target_selection(
             observatory=observatory, start_date=start_date, end_date=end_date,
             sort_by_mag=False,
         )
-        daily.to_csv(daily_path, index=False)
+    daily, excluded_daily = _filter_invalid_mop_magnitudes(daily)
+    if excluded_daily and verbose:
+        print(f"      Excluded {excluded_daily} MOP candidate(s) with mag_now <= 0", flush=True)
+    daily.to_csv(daily_path, index=False)
 
     summary_cache_available = reuse_cache and summary_path.exists() and not refresh_mop_data
     if verbose:
@@ -1041,6 +1057,11 @@ def run_target_selection(
             refresh_parameters=not reuse_cache,
         )
         visible_summary.to_csv(summary_path, index=False)
+    visible_summary, excluded_summary = _filter_invalid_mop_magnitudes(visible_summary)
+    if excluded_summary and verbose and not excluded_daily:
+        print(f"      Excluded {excluded_summary} MOP summary target(s) with mag_now <= 0", flush=True)
+    if excluded_summary:
+        visible_summary.to_csv(summary_path, index=False)
 
     # The analysis union includes MOP-visible targets and all targets already
     # observed by local surveys. Observed-only targets are enriched from MOP
@@ -1053,6 +1074,7 @@ def run_target_selection(
     observed_only = observed_targets.loc[
         ~observed_targets["Target"].map(canonical_target_name).isin(visible_keys)
     ].copy() if not observed_targets.empty else pd.DataFrame()
+    excluded_observed = 0
     if not observed_only.empty:
         try:
             observed_only = mop.enrich_microlensing_parameters(
@@ -1067,6 +1089,9 @@ def run_target_selection(
             observed_only["mop_parameters_status"] = "unavailable"
             observed_only["mop_parameters_error"] = str(exc)
         observed_only["is_mop_visible_in_run"] = False
+        observed_only, excluded_observed = _filter_invalid_mop_magnitudes(observed_only)
+        if excluded_observed and verbose:
+            print(f"      Excluded {excluded_observed} previously observed target(s) with MOP mag_now <= 0", flush=True)
     visible_summary["is_user_supplied"] = False
     observed_keys = set(observed_targets["Target"].map(canonical_target_name)) if not observed_targets.empty else set()
     user_keys = set(user_targets["Target"].map(canonical_target_name)) if not user_targets.empty else set()
@@ -1461,6 +1486,28 @@ def run_target_selection(
             hsh_summary, paths["tables"] / "hsh_observation_summary.csv",
         )
         combined = combined.merge(hsh_summary, on="Target", how="left")
+    from observing_selection_summary import (
+        build_observing_selection_summary,
+        save_observing_selection_summary,
+    )
+    if verbose:
+        print("      Observing selection summary", flush=True)
+    observing_selection_summary = build_observing_selection_summary(
+        combined, coverage_rows, Path(root_dir) / "mop_photometry",
+        hsh_image_catalog=hsh_image_catalog,
+        release_visit_exptime_s=release.default_visit_exptime_s,
+        peak_half_width_t_e=hsh_peak_half_width_t_e,
+        event_half_width_t_e=hsh_event_half_width_t_e,
+    )
+    save_observing_selection_summary(
+        observing_selection_summary,
+        paths["tables"] / "observing_selection_summary.csv",
+        paths["tables"] / "observing_selection_summary.png",
+        release_name=release.name,
+        release_visit_exptime_s=release.default_visit_exptime_s,
+        peak_half_width_t_e=hsh_peak_half_width_t_e,
+        event_half_width_t_e=hsh_event_half_width_t_e,
+    )
     combined.to_csv(paths["tables"] / "combined_targets.csv", index=False)
     save_target_summary(
         combined, photometry_dir=Path(root_dir) / "mop_photometry",
@@ -1545,6 +1592,7 @@ def run_target_selection(
         "data_release": release.name,
         "observatory": observatory, "start_date": start_date, "end_date": end_date,
         "n_daily_rows": int(len(daily)), "n_targets": int(len(combined)),
+        "n_mop_invalid_magnitude_excluded": int(excluded_daily + excluded_summary + excluded_observed),
         "max_workers": int(max_workers), "reuse_cache": bool(reuse_cache),
         "cache_version": CACHE_VERSION,
         "target_report_version": TARGET_REPORT_VERSION,
@@ -1574,6 +1622,7 @@ def run_target_selection(
         "overwrite_release_photometry": bool(overwrite_release_photometry),
         "forced_photometry_version": forced_photometry_version,
         "hsh_image_catalog": None if hsh_image_catalog is None else str(hsh_image_catalog),
+        "refresh_hsh_data": bool(refresh_hsh_data),
         "hsh_peak_half_width_t_e": float(hsh_peak_half_width_t_e),
         "hsh_event_half_width_t_e": float(hsh_event_half_width_t_e),
         "include_previously_observed": bool(include_previously_observed),

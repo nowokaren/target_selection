@@ -63,6 +63,7 @@ Restart the kernel and select **Run All**. The main function is `run_target_sele
 
 - `max_workers=4`: query concurrency.
 - `reuse_cache=True`: reuse previous downloads and queries.
+- MOP candidates with `mag_now <= 0` are discarded before visibility selection, TAP, Butler, and report stages because this is an invalid current-magnitude value.
 - `overwrite_target_plots=False`: keep current reports and resume an interrupted report stage; set `True` only to regenerate every report.
 - `target_plotter=False`: skip individual reports.
 - `target_report_scope="all_queried"`: generate reports for every Rubin-query target; set `"visibility_selected"` to generate them only for targets that pass the local visibility filter on at least one requested night.
@@ -164,7 +165,7 @@ plot_visibility_sequence(
 )
 ```
 
-For explicit selection outside the pipeline, use `select_nightly_targets(...)`. Set `return_all=True` to retain rejected targets and their reasons. `plot_visibility_sequence(...)` shares an 18:00–07:00 axis (extended when an assigned interval ends later), orders panels chronologically, repeats time labels every `x_reference_every` nights, and writes PDF by default when no extension is supplied. The twilight shading therefore includes both evening and dawn transitions.
+For explicit selection outside the pipeline, use `select_nightly_targets(...)`. Set `return_all=True` to retain rejected targets and their reasons. `plot_visibility_sequence(...)` starts at the first evening civil twilight (and extends through dawn or a later assigned interval), orders panels chronologically, repeats time labels every `x_reference_every` nights, and writes PDF by default when no extension is supplied. The twilight shading therefore includes both evening and dawn transitions.
 
 ## Outputs
 
@@ -185,6 +186,8 @@ outputs/
     │   ├── queried_targets.csv          # Complete source-labeled Rubin query list
     │   ├── coverage_raw.csv            # Rubin visit/detector rows
     │   ├── coverage_summary.csv        # Coverage and visits by band
+    │   ├── observing_selection_summary.csv # Visibility-passing targets, stage coverage, and parameters
+    │   ├── observing_selection_summary.png # Bright-to-faint observing planning table
     │   ├── release_forced_photometry.csv # Optional PSF fluxes, magnitudes, flags, and status
     │   ├── release_forced_photometry_metadata.json # Cache/version metadata
     │   ├── release_visit_centers.csv    # Optional cached background input
@@ -194,7 +197,7 @@ outputs/
     │   └── target_summary.png          # Visual summary table
     ├── sky_plots/                      # Full-sky and bulge maps
     ├── monitoring_reports/
-    │   └── monitoring_lightcurves.pdf  # Optional MOP curves with DP2/HSH/JS epochs
+    │   └── monitoring_lightcurves.pdf  # Optional MOP curves with DP2/HSH/JS epochs and t0 ± 2tE zooms
     ├── visibility_plots/               # Automatically filtered nightly plots
     │   └── visibility_selection.csv    # Metrics, decisions, and rejection reasons
     └── targets/
@@ -207,11 +210,12 @@ The run directory includes the default observing window. A schedule with per-nig
 ### Which table should I use?
 
 - Exact targets sent to the Rubin coverage query, including their source and visibility-pass flag: `queried_targets.csv`.
-- Per-target local visibility metrics, pass/fail decision, and rejection reason: `visibility_target_summary.csv`. By default it covers the complete queried union (MOP-visible, configured registered-survey targets, and optional user targets).
-- Per-night visibility metrics and decisions: `visibility_plots/visibility_selection.csv`.
+- Per-target local visibility metrics, current MOP magnitude, maximum observable time, pass/fail decision, and rejection reason: `visibility_target_summary.csv`. By default it covers the complete queried union (MOP-visible, configured registered-survey targets, and optional user targets).
+- Per-night visibility metrics and decisions: `visibility_plots/visibility_selection.csv`; use `observable_minutes` and `mag_now` to reproduce each nightly legend label.
 - Final target list and all properties: `combined_targets.csv`.
 - HSH-only observation, stage, and astrometry/geometry-quality summary: `hsh_observation_summary.csv`.
 - Visits by filter, MOP points, `t_E`, `t_0`, and `u_0`: `target_summary.csv`.
+- Bright-to-faint targets that pass the visibility filter, including best visible interval and stage-resolved MOP/HSH/Data Release coverage: `observing_selection_summary.csv` and `.png`. MOP exposure durations are not published by the source, so its stage cells are point counts; Data Release time uses the profile's nominal unique-visit exposure.
 - Unaggregated visit/detector rows: `coverage_raw.csv`.
 - Complete MOP photometry: `outputs/mop_photometry/<Target>.csv` (the former `outputs/photometry` cache is migrated lazily when used).
 - Complete optional Rubin forced photometry: `tables/release_forced_photometry.csv`.

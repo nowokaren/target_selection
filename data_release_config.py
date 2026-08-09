@@ -28,6 +28,7 @@ class DataReleaseConfig:
         default_factory=lambda: {"visitId": "visit", "detector": "detector"}
     )
     photometry_method: str = "calexp_forced"
+    default_visit_exptime_s: float | None = 30.0
     tap_dia_object_table: str | None = None
     tap_dia_forced_source_table: str | None = None
     notes: str = ""

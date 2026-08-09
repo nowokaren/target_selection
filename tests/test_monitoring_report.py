@@ -1,6 +1,8 @@
 import pandas as pd
 
-from monitoring_report import create_monitoring_report, plot_monitoring_lightcurve
+from monitoring_report import (
+    _microlensing_zoom_limits, create_monitoring_report, plot_monitoring_lightcurve,
+)
 
 
 def test_monitoring_report_writes_pdf(tmp_path):
@@ -76,3 +78,14 @@ def test_temporal_coverage_lanes_are_separated_and_include_nonusable_images():
     labels = [item.get_text() for item in axis.get_legend().get_texts()]
     assert any("HSH images (N=2, 0.2 h)" in label for label in labels)
     plt.close(figure)
+
+
+
+def test_microlensing_zoom_uses_hjd_and_nominal_mop_values():
+    target = pd.Series({
+        "mop_t_0_hjd": "2460000.0±0.2", "mop_t_e_days": "20.0±1.0",
+    })
+    limits = _microlensing_zoom_limits(target)
+    assert limits is not None
+    assert limits[1] - limits[0] == 80.0
+    assert _microlensing_zoom_limits(pd.Series({"mop_t_0_hjd": "unknown"})) is None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+import re
 from pathlib import Path
 
 import matplotlib.dates as mdates
@@ -44,6 +45,25 @@ def _mjd_to_dates(values: pd.Series | np.ndarray) -> np.ndarray:
     timestamps = pd.to_datetime(mjd, unit="D", origin="1858-11-17", errors="coerce")
     timestamps = timestamps[~pd.isna(timestamps)]
     return mdates.date2num(timestamps.to_numpy(dtype="datetime64[us]"))
+
+
+
+def _nominal_parameter(value: object) -> float:
+    """Extract a numerical parameter value from MOP value±uncertainty text."""
+    match = re.search(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", str(value))
+    return float(match.group()) if match else np.nan
+
+
+def _microlensing_zoom_limits(target: pd.Series) -> tuple[float, float] | None:
+    """Return Matplotlib date limits for the MOP window t0 ± 2 tE."""
+    t_e_days = _nominal_parameter(target.get("mop_t_e_days", np.nan))
+    t_0_hjd = _nominal_parameter(target.get("mop_t_0_hjd", np.nan))
+    if not np.isfinite(t_e_days) or t_e_days <= 0 or not np.isfinite(t_0_hjd):
+        return None
+    center = _mjd_to_dates(pd.Series([t_0_hjd - 2400000.5]))
+    if not len(center):
+        return None
+    return float(center[0] - 2 * t_e_days), float(center[0] + 2 * t_e_days)
 
 
 def _shade_epochs(
@@ -131,6 +151,8 @@ def plot_monitoring_lightcurve(
     observatory_photometry: pd.DataFrame | None = None,
     data_release: str = "DP2",
     layers: Iterable[str] | None = None,
+    title: str | None = None,
+    show_legend: bool = True,
     ax=None,
 ) -> plt.Axes:
     """Plot selected MOP, Rubin, HSH, and JS monitoring layers for one target."""
@@ -215,8 +237,9 @@ def plot_monitoring_lightcurve(
     te = target.get("mop_t_e_days", np.nan)
     t0 = target.get("mop_t_0_hjd", np.nan)
     parameter_text = "; ".join(f"{label}={value}" for label, value in (("t_E", te), ("t_0", t0)) if pd.notna(value))
-    ax.set_title(f"{name} — {status}" + (f" — {parameter_text}" if parameter_text else ""), fontsize=9)
-    if handles:
+    default_title = f"{name} — {status}" + (f" — {parameter_text}" if parameter_text else "")
+    ax.set_title(default_title if title is None else title, fontsize=9)
+    if handles and show_legend:
         ax.legend(handles=handles, loc="best", fontsize=7, frameon=False, ncol=min(3, len(handles)))
     if has_photometry:
         ax.invert_yaxis()
@@ -276,22 +299,37 @@ def create_monitoring_report(
     with PdfPages(output_path) as pdf:
         for start in range(0, len(records), plots_per_page):
             page = records.iloc[start:start + plots_per_page]
-            fig, axes = plt.subplots(plots_per_page, 1, figsize=(11.7, 3.3 * plots_per_page), squeeze=False)
-            axes = axes[:, 0]
-            for ax, (_, target) in zip(axes, page.iterrows()):
+            fig = plt.figure(figsize=(14.0, 3.5 * plots_per_page))
+            grid = fig.add_gridspec(
+                plots_per_page, 2, width_ratios=(2.25, 1.0), hspace=.48, wspace=.18,
+            )
+            for row_index, (_, target) in enumerate(page.iterrows()):
                 name = str(target["Target"])
                 target_photometry = loader(target) if "mop_photometry" in selected_layers else pd.DataFrame()
+                main_axis = fig.add_subplot(grid[row_index, 0])
+                zoom_axis = fig.add_subplot(grid[row_index, 1])
+                plot_kwargs = {
+                    "lsst_coverage": coverage_groups.get(name),
+                    "observatory_epochs": epoch_groups.get(name),
+                    "observatory_photometry": photometry_groups.get(name),
+                    "data_release": data_release,
+                    "layers": selected_layers,
+                }
+                plot_monitoring_lightcurve(target, target_photometry, ax=main_axis, **plot_kwargs)
+                limits = _microlensing_zoom_limits(target)
+                if limits is None:
+                    zoom_axis.set_axis_off()
+                    continue
                 plot_monitoring_lightcurve(
-                    target, target_photometry, ax=ax,
-                    lsst_coverage=coverage_groups.get(name),
-                    observatory_epochs=epoch_groups.get(name),
-                    observatory_photometry=photometry_groups.get(name),
-                    data_release=data_release, layers=selected_layers,
+                    target, target_photometry, ax=zoom_axis, show_legend=False,
+                    title="MOP zoom: $t_0 \\pm 2t_E$", **plot_kwargs,
                 )
-            for ax in axes[len(page):]:
-                ax.set_axis_off()
+                zoom_axis.set_xlim(*limits)
+            for row_index in range(len(page), plots_per_page):
+                fig.add_subplot(grid[row_index, 0]).set_axis_off()
+                fig.add_subplot(grid[row_index, 1]).set_axis_off()
             fig.suptitle("Target-selection monitoring report", fontsize=12, y=.995)
-            fig.tight_layout(rect=(0, 0, 1, .985))
+            fig.subplots_adjust(top=.94, bottom=.06, left=.06, right=.985)
             pdf.savefig(fig)
             plt.close(fig)
             pages += 1
