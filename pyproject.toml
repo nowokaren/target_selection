@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mop-target-selection"
-version = "0.1.0"
-description = "Select visible MOP microlensing targets with Rubin data-release coverage"
+version = "0.2.0.dev0"
+description = "Combine target providers and observing surveys for follow-up planning"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -14,14 +14,20 @@ dependencies = [
   "matplotlib>=3.7",
   "tqdm>=4.66",
   "astropy>=6",
+  "tomli>=2; python_version < '3.11'",
   "mop-api @ git+https://github.com/nowokaren/mop_api.git@28f8f87",
 ]
 
+[project.scripts]
+target-selection = "target_selection.cli:main"
+
 [project.optional-dependencies]
 test = ["pytest>=8"]
+docs = ["mkdocs>=1.6,<2"]
 
 [tool.setuptools]
 py-modules = ["target_selection_pipeline", "data_release_config", "mop_photometry", "release_photometry", "target_report", "visibility_plotter", "observatory_observations", "target_registry", "monitoring_report"]
+packages = ["target_selection", "target_selection.sources"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

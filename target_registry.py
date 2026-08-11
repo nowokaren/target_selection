@@ -8,7 +8,6 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-import numpy as np
 import pandas as pd
 
 from observatory_observations import canonical_target_name, load_hsh_astrometry_catalog
@@ -75,6 +74,42 @@ class TargetRegistry:
                     refreshed_on TEXT,
                     updated_utc TEXT NOT NULL,
                     PRIMARY KEY(provider, source_id)
+                );
+                CREATE TABLE IF NOT EXISTS source_target_records (
+                    source_name TEXT NOT NULL,
+                    source_role TEXT NOT NULL,
+                    target_key TEXT NOT NULL REFERENCES targets(target_key),
+                    record_json TEXT NOT NULL,
+                    source_observed_at TEXT,
+                    updated_utc TEXT NOT NULL,
+                    PRIMARY KEY(source_name, target_key)
+                );
+                CREATE INDEX IF NOT EXISTS source_target_records_target
+                    ON source_target_records(target_key, source_role);
+                CREATE TABLE IF NOT EXISTS photometry_points (
+                    point_id TEXT PRIMARY KEY,
+                    source_name TEXT NOT NULL,
+                    source_role TEXT NOT NULL,
+                    target_key TEXT NOT NULL REFERENCES targets(target_key),
+                    target_name TEXT NOT NULL,
+                    mjd REAL NOT NULL,
+                    band TEXT,
+                    magnitude REAL,
+                    magnitude_error REAL,
+                    flux REAL,
+                    flux_error REAL,
+                    metadata_json TEXT,
+                    updated_utc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS photometry_points_target_source_mjd
+                    ON photometry_points(target_key, source_name, mjd);
+                CREATE TABLE IF NOT EXISTS analysis_runs (
+                    run_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    output_path TEXT NOT NULL,
+                    config_json TEXT NOT NULL,
+                    created_utc TEXT NOT NULL,
+                    updated_utc TEXT NOT NULL
                 );
                 """
             )
@@ -318,3 +353,228 @@ class TargetRegistry:
         if data.empty:
             return pd.DataFrame(columns=["Target", "provider", "mjd", "band", "exptime_s", "usable"])
         return names.merge(data, on="target_key", how="inner").drop(columns="target_key")
+    def upsert_source_records(
+        self,
+        records: pd.DataFrame,
+        *,
+        source_name: str,
+        source_role: str,
+        observed_at_column: str | None = None,
+    ) -> int:
+        """Store the latest normalized record supplied by one source per target."""
+        if records.empty or "Target" not in records:
+            return 0
+        self.register_targets(records, provider=source_name)
+        now = self._now()
+        payloads = []
+        for row in records.to_dict(orient="records"):
+            name = str(row["Target"]).strip()
+            if not name:
+                continue
+            observed_at = row.get(observed_at_column) if observed_at_column else None
+            serializable = {}
+            for key, value in row.items():
+                missing = pd.isna(value)
+                if isinstance(missing, bool) and missing:
+                    serializable[key] = None
+                else:
+                    serializable[key] = value
+            payloads.append(
+                (
+                    str(source_name),
+                    str(source_role),
+                    canonical_target_name(name),
+                    json.dumps(serializable, default=str, sort_keys=True),
+                    None
+                    if observed_at is None or pd.isna(observed_at)
+                    else str(observed_at),
+                    now,
+                )
+            )
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO source_target_records(
+                    source_name, source_role, target_key, record_json,
+                    source_observed_at, updated_utc
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_name, target_key) DO UPDATE SET
+                    source_role=excluded.source_role,
+                    record_json=excluded.record_json,
+                    source_observed_at=excluded.source_observed_at,
+                    updated_utc=excluded.updated_utc
+                """,
+                payloads,
+            )
+        return len(payloads)
+
+    def import_photometry(
+        self,
+        source_name: str,
+        photometry: pd.DataFrame,
+        *,
+        source_role: str,
+    ) -> int:
+        """Upsert normalized photometry from any provider or survey.
+
+        Required columns are Target and mjd. Optional common columns are band,
+        magnitude, magnitude_error, flux, flux_error, and point_id.
+        """
+        required = {"Target", "mjd"}
+        missing = required - set(photometry.columns)
+        if missing:
+            raise ValueError(f"Photometry is missing columns: {sorted(missing)}")
+        data = photometry.copy()
+        data["mjd"] = pd.to_numeric(data["mjd"], errors="coerce")
+        data = data.dropna(subset=["Target", "mjd"])
+        self.register_targets(data, provider=source_name)
+        now = self._now()
+        rows = []
+        for index, row in data.iterrows():
+            name = str(row["Target"])
+            point_id = str(
+                row.get(
+                    "point_id",
+                    f"{source_name}:{canonical_target_name(name)}:{float(row['mjd']):.8f}:"
+                    f"{row.get('band', '')}:{index}",
+                )
+            )
+            known = {
+                "Target",
+                "mjd",
+                "band",
+                "magnitude",
+                "magnitude_error",
+                "flux",
+                "flux_error",
+                "point_id",
+            }
+            metadata = {key: value for key, value in row.items() if key not in known}
+
+            def numeric(key: str) -> float | None:
+                return float(row[key]) if key in row and pd.notna(row[key]) else None
+
+            rows.append(
+                (
+                    point_id,
+                    str(source_name),
+                    str(source_role),
+                    canonical_target_name(name),
+                    name,
+                    float(row["mjd"]),
+                    str(row["band"]) if pd.notna(row.get("band")) else None,
+                    numeric("magnitude"),
+                    numeric("magnitude_error"),
+                    numeric("flux"),
+                    numeric("flux_error"),
+                    json.dumps(metadata, default=str, sort_keys=True),
+                    now,
+                )
+            )
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO photometry_points(
+                    point_id, source_name, source_role, target_key, target_name,
+                    mjd, band, magnitude, magnitude_error, flux, flux_error,
+                    metadata_json, updated_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(point_id) DO UPDATE SET
+                    source_name=excluded.source_name, source_role=excluded.source_role,
+                    target_key=excluded.target_key, target_name=excluded.target_name,
+                    mjd=excluded.mjd, band=excluded.band, magnitude=excluded.magnitude,
+                    magnitude_error=excluded.magnitude_error, flux=excluded.flux,
+                    flux_error=excluded.flux_error, metadata_json=excluded.metadata_json,
+                    updated_utc=excluded.updated_utc
+                """,
+                rows,
+            )
+        return len(rows)
+
+    def source_catalog(self) -> pd.DataFrame:
+        """Return one compact row per target and source."""
+        query = """
+            SELECT t.preferred_name AS Target, t.ra_deg AS RA_deg, t.dec_deg AS Dec_deg,
+                   r.source_name, r.source_role, r.source_observed_at,
+                   r.record_json, r.updated_utc
+            FROM source_target_records r
+            JOIN targets t ON t.target_key=r.target_key
+            ORDER BY t.preferred_name, r.source_role, r.source_name
+        """
+        with self._connect() as connection:
+            return pd.read_sql_query(query, connection)
+
+    def record_run(
+        self,
+        run_id: str,
+        config: dict,
+        output_path: str | Path,
+        *,
+        status: str,
+    ) -> None:
+        """Record a reproducible analysis run and its output location."""
+        now = self._now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO analysis_runs(
+                    run_id, status, output_path, config_json, created_utc, updated_utc
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    status=excluded.status, output_path=excluded.output_path,
+                    config_json=excluded.config_json, updated_utc=excluded.updated_utc
+                """,
+                (
+                    str(run_id),
+                    str(status),
+                    str(Path(output_path)),
+                    json.dumps(config, default=str, sort_keys=True),
+                    now,
+                    now,
+                ),
+            )
+
+    def photometry(
+        self,
+        targets: pd.DataFrame,
+        sources: Iterable[str] | None = None,
+    ) -> pd.DataFrame:
+        """Return normalized stored photometry for the requested targets."""
+        columns = [
+            "Target",
+            "provider",
+            "mjd",
+            "band",
+            "magnitude",
+            "magnitude_error",
+            "flux",
+            "flux_error",
+        ]
+        if targets.empty or "Target" not in targets:
+            return pd.DataFrame(columns=columns)
+        names = targets[["Target"]].drop_duplicates().copy()
+        names["target_key"] = names["Target"].map(canonical_target_name)
+        target_placeholders = ",".join("?" for _ in range(len(names)))
+        parameters: list[str] = list(names["target_key"])
+        source_clause = ""
+        if sources is not None:
+            normalized_sources = tuple(str(source) for source in sources)
+            if not normalized_sources:
+                return pd.DataFrame(columns=columns)
+            source_placeholders = ",".join("?" for _ in normalized_sources)
+            source_clause = f" AND source_name IN ({source_placeholders})"
+            parameters.extend(normalized_sources)
+        query = f"""
+            SELECT target_key, source_name AS provider, mjd, band, magnitude,
+                   magnitude_error, flux, flux_error
+            FROM photometry_points
+            WHERE target_key IN ({target_placeholders}){source_clause}
+            ORDER BY target_key, source_name, mjd
+        """
+        with self._connect() as connection:
+            data = pd.read_sql_query(query, connection, params=parameters)
+        if data.empty:
+            return pd.DataFrame(columns=columns)
+        return names.merge(data, on="target_key", how="inner").drop(
+            columns="target_key"
+        )

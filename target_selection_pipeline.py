@@ -961,6 +961,7 @@ def run_target_selection(
     max_workers: int = 4,
     reuse_cache: bool = True,
     overwrite_target_plots: bool = False,
+    generate_sky_maps: bool = True,
     sky_marker_encoding: str = "split_color",
     show_coverage_background: bool = False,
     coverage_resolution: int = 19,
@@ -1564,16 +1565,17 @@ def run_target_selection(
         if verbose:
             print("      Monitoring light-curve PDF", flush=True)
         report_epochs = registry.observation_epochs(combined)
+        report_photometry = registry.photometry(combined)
         create_monitoring_report(
             combined,
             paths["monitoring_reports"] / "monitoring_lightcurves.pdf",
             mop=mop, mop_photometry_dir=Path(root_dir) / "mop_photometry",
             lsst_coverage=coverage_rows, observatory_epochs=report_epochs,
-            data_release=release.name, layers=monitoring_layers,
+            observatory_photometry=report_photometry, data_release=release.name, layers=monitoring_layers,
             plots_per_page=monitoring_report_plots_per_page,
         )
 
-    if {"coverage_n_visits", "mag_now"}.issubset(combined.columns):
+    if generate_sky_maps and {"coverage_n_visits", "mag_now"}.issubset(combined.columns):
         plot_sky_dual_metric(
             combined, "mag_now", "coverage_n_visits",
             paths["sky_plots"] / "sky_by_mag_and_visits.png",
@@ -1643,6 +1645,7 @@ def run_target_selection(
         "overwrite_target_plots": bool(overwrite_target_plots),
         "target_report_scope": target_report_scope,
         "n_target_reports_requested": int(len(report_targets)),
+        "generate_sky_maps": bool(generate_sky_maps),
         "sky_marker_encoding": sky_marker_encoding,
         "show_coverage_background": bool(show_coverage_background),
         "coverage_resolution": int(coverage_resolution),

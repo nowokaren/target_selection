@@ -1,10 +1,37 @@
 # MOP target selection with Rubin coverage
 
-This project cross-matches visible MOP targets with a Rubin Data Preview/Data Release and generates tables, sky maps, and graphical reports for each target. The currently validated run uses **DP2**; the DP0.1, DP0.2, and DP1 profiles may require collection or table adjustments for a specific RSP deployment.
+This project combines candidate events from target providers, observing history from follow-up surveys, and contextual data from reference surveys to support follow-up planning. Current built-in sources include MOP, CASLEO/HSH, normalized CSV surveys such as CASLEO/JS, and Rubin Data Preview/Data Release collections. The v0.1 MOP + DP2 workflow remains available as a compatible low-level API.
+
+## Recommended interface
+
+Select active sources in `configs/example.toml`; the frequently changed dates, observatory, sources, and scientific cuts are at the top. Source paths, cache policy, and runtime details are grouped below.
+
+```bash
+target-selection validate-config --config configs/example.toml
+target-selection list-sources
+target-selection run --config configs/example.toml
+```
+
+The same configuration is used from Python or the notebook:
+
+```python
+from target_selection import load_config, run_analysis
+
+config = load_config("configs/example.toml")
+result = run_analysis(config)
+dp2_targets = result.runs["rubin_dp2"].targets
+```
+
+The three source roles are target providers (MOP and future OMP), follow-up surveys (CASLEO/HSH and CASLEO/JS), and reference surveys (Rubin DP1/DP2). See `docs/architecture.md`, `docs/adding_sources.md`, and `docs/products.md`.
+
+
 
 ## Project files
 
-- `mop_lsst.ipynb`: ordered entry point for an interactive run.
+- `mop_lsst.ipynb`: ordered interactive entry point using the shared TOML configuration.
+- `target_selection/`: normalized configuration, adapters, workflow, and CLI.
+- `configs/example.toml`: ordered configuration shared by CLI and notebook.
+- `docs/`: architecture, extension, and product guides.
 - `target_selection_pipeline.py`: orchestration, queries, caching, tables, and sky maps.
 - `mop_photometry.py`: MOP photometry loading, caching, and preparation.
 - `target_report.py`: graphical dashboard for each target.
@@ -29,37 +56,15 @@ python -m pip install -e .
 
 The installation automatically downloads the tested `mop_api` version from GitHub. The `lsst.*` libraries are supplied by the RSP environment and are not installed with pip.
 
-## Quick start
+## Notebook
 
-Open `mop_lsst.ipynb` and edit the **Configuration** cell:
+Open `mop_lsst.ipynb`, edit `configs/example.toml`, restart the kernel, and select **Run All**. The notebook loads `AnalysisConfig`, calls `run_analysis(config)`, and displays the products of the first selected reference survey. Additional reference-survey results remain available in `analysis_result.runs`.
 
-```python
-DATA_RELEASE_NAME = "DP2"  # DP0.1, DP0.2, DP1, or DP2
-START_DATE = "2026-08-01"
-END_DATE = "2026-08-15"
-OUTPUT_DIR = Path("outputs")
-OBSERVATORY = "El Leoncito"
+The first run may take time because it refreshes the configured providers and surveys; later runs reuse the persistent registry and provider-specific caches.
 
-SKY_MARKER_ENCODING = "split_color"  # or "color_size"
-SHOW_COVERAGE_BACKGROUND = False
-COVERAGE_RESOLUTION = 19
+## Legacy low-level API
 
-# Optional: measure Rubin PSF fluxes on deep coadds at the target coordinates.
-GENERATE_RELEASE_PHOTOMETRY = True
-RELEASE_PHOTOMETRY_TARGETS = None  # Or a list such as ["OGLE-2026-BLG-0001"]
-
-# Optional local HSH astrometry catalogue; use None when it is unavailable.
-HSH_IMAGE_CATALOG = Path("hsh_data/image_collection_astro.csv")
-INCLUDE_PREVIOUSLY_OBSERVED = True
-PREVIOUSLY_OBSERVED_PROVIDERS = ("HSH", "JS")  # Or ("HSH",)
-# Optional DataFrame or CSV path; columns: Target, RA_deg, Dec_deg.
-ADDITIONAL_TARGETS = None
-VISIBILITY_TARGET_SCOPE = "all_queried"  # Or "mop_daily"
-GENERATE_MONITORING_REPORT = True
-MONITORING_REPORT_PLOTS_PER_PAGE = 3
-```
-
-Restart the kernel and select **Run All**. The main function is `run_target_selection(...)`; it automatically creates the MOP, TAP, and Butler clients and uses the standard report generator. The first run may take time because it queries MOP, TAP, and Butler; later runs reuse caches.
+`run_target_selection(...)` remains available for advanced single-Rubin-release calls and dependency injection.
 
 - `max_workers=4`: query concurrency.
 - `reuse_cache=True`: reuse previous downloads and queries.

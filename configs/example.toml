@@ -1,0 +1,94 @@
+# Runnable example. Copy this file for a real analysis.
+# Complete keyword reference: docs/configuration.md
+
+# Frequently changed run inputs. Omit end_date for a single night.
+[run]
+start_date = "2026-08-01"
+end_date = "2026-08-15"
+observatory = "El Leoncito"
+output_dir = "outputs"
+
+# Select definition names declared later. Any role may use an empty list.
+[sources]
+target_providers = ["mop"]
+followup_surveys = ["casleo_hsh"]
+reference_surveys = ["rubin_dp2"]
+
+[selection]
+# Missing MOP magnitudes are retained; omit this keyword for no faint limit.
+maximum_current_magnitude = 18.5
+minimum_altitude_deg = 40.0
+minimum_observable_minutes = 90.0
+time_step_minutes = 1
+# "all_queried" or "mop_daily"
+visibility_target_scope = "all_queried"
+# Local time pair applied to every night; the interval may cross midnight.
+observing_windows = ["20:30", "07:00"]
+
+[products]
+visibility_plots = true
+sky_maps = true
+monitoring_report = true
+# Target reports and reference photometry are the expensive optional stages.
+target_reports = false
+# "visibility_selected" or "all_queried"
+target_report_scope = "visibility_selected"
+reference_photometry = false
+# Omit for all eligible targets, or uncomment to request a subset.
+# reference_photometry_targets = ["OGLE-2026-BLG-0001"]
+coverage_background = false
+# "split_color" or "color_size"
+marker_encoding = "split_color"
+monitoring_layers = [
+  "target_provider_photometry",
+  "reference_epochs",
+  "followup_surveys",
+]
+
+# Source definitions: edit these when adding or relocating a source.
+[target_providers.mop]
+adapter = "mop"
+label = "MOP"
+capabilities = ["targets", "parameters", "photometry"]
+enrich = true
+
+[followup_surveys.casleo_hsh]
+adapter = "hsh"
+label = "CASLEO/HSH"
+capabilities = ["targets", "observations"]
+provider_name = "HSH"
+inventory_path = "hsh_data/image_collection_astro.csv"
+
+# This definition is available but not selected in [sources].
+[followup_surveys.casleo_js]
+adapter = "csv"
+label = "CASLEO/JS"
+capabilities = ["targets", "observations", "photometry"]
+provider_name = "JS"
+inventory_path = "js_data/observations.csv"
+enabled = false
+
+[reference_surveys.rubin_dp2]
+adapter = "rubin"
+label = "Rubin DP2"
+capabilities = ["visits", "images", "photometry"]
+data_release = "DP2"
+
+# Less frequently changed cache policy.
+[cache]
+reuse = true
+# Relative paths are resolved below output_dir.
+database_path = "target_database/target_selection.sqlite"
+refresh_target_providers = false
+refresh_followup_surveys = false
+
+# Less frequently changed runtime and product-overwrite details.
+[runtime]
+max_workers = 4
+verbose = true
+overwrite_visibility_plots = false
+overwrite_target_reports = false
+overwrite_reference_photometry = false
+monitoring_plots_per_page = 3
+# Coarse coverage-background grid; larger values use smaller cells.
+coverage_resolution = 19
