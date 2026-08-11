@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.lines import Line2D
+from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.patches import Patch
 import numpy as np
 import pandas as pd
@@ -19,7 +20,7 @@ from astropy.time import Time
 from astropy.utils import iers
 
 
-VISIBILITY_PLOT_VERSION = 5
+VISIBILITY_PLOT_VERSION = 21
 
 
 OBSERVATORIES = {
@@ -282,6 +283,24 @@ def plot_nightly_visibility(
         local_times, night, timezone, observing_windows,
     )
     iers.conf.auto_download = False
+    # Restrict the plotted interval to twilight and nighttime.  The time grid
+    # may extend to an allocated end time after sunrise, but daytime is not
+    # useful for this visibility view and should never appear on the x-axis.
+    initial_frame = AltAz(obstime=times, location=location)
+    initial_sun = get_body("sun", times, location=location)
+    initial_sun_altitude = initial_sun.transform_to(initial_frame).alt.degree
+    night_indices = np.flatnonzero(initial_sun_altitude < 0)
+    if len(night_indices):
+        start_index = int(night_indices[0])
+        sunrise_indices = np.flatnonzero(
+            (np.arange(len(initial_sun_altitude)) > start_index)
+            & (initial_sun_altitude >= 0)
+        )
+        end_index = int(sunrise_indices[0]) if len(sunrise_indices) else len(times)
+        local_times = local_times[start_index:end_index]
+        times = times[start_index:end_index]
+        allocated_time = allocated_time[start_index:end_index]
+
     frame = AltAz(obstime=times, location=location)
     sun = get_body("sun", times, location=location)
     sun_altitude = sun.transform_to(frame).alt.degree
@@ -295,11 +314,14 @@ def plot_nightly_visibility(
     unique["RA_deg"] = pd.to_numeric(unique.get("RA_deg"), errors="coerce")
     unique["Dec_deg"] = pd.to_numeric(unique.get("Dec_deg"), errors="coerce")
     unique = unique.dropna(subset=["RA_deg", "Dec_deg"])
-    figure_height = max(7.0, 6.4 + .035 * len(unique))
-    fig, ax = plt.subplots(figsize=(16, figure_height))
+    figure_height = max(8.5, 7.4 + .045 * len(unique))
+    fig, axes = plt.subplots(
+        2, 1, figsize=(11.5, figure_height), sharex=True,
+        gridspec_kw={"height_ratios": (3.2, max(1.2, min(2.8, .12 * max(len(unique), 1))))},
+    )
+    ax, altitude_bar_axis = axes
 
     twilight = [
-        (sun_altitude >= 0, "#fff4c2", "Day"),
         ((sun_altitude < 0) & (sun_altitude >= -6), "#ffe0a3", "Civil twilight"),
         ((sun_altitude < -6) & (sun_altitude >= -12), "#b8cbe3", "Nautical twilight"),
         ((sun_altitude < -12) & (sun_altitude >= -18), "#7f96b3", "Astronomical twilight"),
@@ -319,6 +341,8 @@ def plot_nightly_visibility(
     ])
     palette = palette[np.r_[np.arange(0, 60, 2), np.arange(1, 60, 2)]]
     line_styles = ("-", "--", "-.")
+    altitude_rows = []
+    altitude_names = []
     for target_index, (_, row) in enumerate(unique.iterrows()):
         color = palette[target_index % len(palette)]
         line_style = line_styles[(target_index // len(palette)) % len(line_styles)]
@@ -329,25 +353,102 @@ def plot_nightly_visibility(
             observable_minutes = float(((altitude >= minimum_altitude) & eligible_time).sum() * time_step_minutes)
         ax.plot(local_times, altitude, lw=1.35, ls=line_style, color=color,
                 label=_visibility_target_label(row, observable_minutes), zorder=3)
+        altitude_rows.append(np.asarray(altitude, dtype=float))
+        altitude_names.append(str(row.get("Target", "Target")))
+
+    # Lower panel: one horizontal time bar per target, colored by altitude.
+    # Values below 30 degrees are shown as a pale background; the color scale
+    # itself is fixed to 30--90 degrees for comparisons between nights.
+    if altitude_rows:
+        altitude_matrix = np.vstack(altitude_rows)
+        altitude_matrix = np.ma.masked_where(altitude_matrix < 30.0, altitude_matrix)
+        altitude_bins = np.arange(30.0, 95.0, 5.0)
+        bin_colors = plt.get_cmap("Blues")(np.linspace(.35, .95, len(altitude_bins) - 1))
+        cmap = ListedColormap(bin_colors)
+        cmap.set_bad("#e7f1fb")
+        norm = BoundaryNorm(altitude_bins, cmap.N, clip=True)
+        x_values = mdates.date2num(local_times)
+        if len(x_values) > 1:
+            step = float(np.median(np.diff(x_values)))
+        else:
+            step = 1 / 1440
+        x_edges = np.r_[x_values - step / 2, x_values[-1] + step / 2]
+        image = altitude_bar_axis.imshow(
+            altitude_matrix, origin="lower", aspect="auto",
+            extent=(x_edges[0], x_edges[-1], -0.5, len(altitude_names) - 0.5),
+            cmap=cmap, norm=norm, interpolation="nearest",
+        )
+        altitude_bar_axis.set_yticks(np.arange(len(altitude_names)))
+        altitude_bar_axis.set_yticklabels(altitude_names, fontsize=7)
+        altitude_bar_axis.set_ylabel("Targets", fontsize=8)
+        altitude_bar_axis.set_xlabel(f"Local time\n[{timezone.key}]")
+        altitude_bar_axis.grid(False)
+        colorbar = fig.colorbar(
+            image, ax=altitude_bar_axis, orientation="horizontal", location="bottom",
+            pad=.11, fraction=.07, aspect=45,
+            boundaries=altitude_bins, ticks=altitude_bins, spacing="proportional",
+        )
+        colorbar.set_label("Altitude bins [deg]", fontsize=8)
+        colorbar.ax.tick_params(labelsize=7)
+    else:
+        altitude_bar_axis.text(.5, .5, "No targets selected", transform=altitude_bar_axis.transAxes,
+                               ha="center", va="center")
+        altitude_bar_axis.set_yticks([])
 
     ax.plot(local_times, moon_altitude, color="0.25", lw=1.4, ls="--",
             label=f"Moon ({moon_illumination:.0f}% illuminated)", zorder=2)
     ax.axhline(minimum_altitude, color="firebrick", lw=1, ls=":",
                label=f"Minimum altitude ({minimum_altitude:g}°)")
-    ax.set_ylim(0, 92)
+    ax.set_ylim(0, 90)
     ax.set_xlim(local_times[0], local_times[-1])
     ax.margins(x=0)
     ax.set_ylabel("Altitude [deg]")
-    ax.set_xlabel(f"Local time [{timezone.key}]")
-    ax.set_title(
+    ax.tick_params(axis="y", labelsize=8)
+    ax.set_xlabel("")
+    altitude_bar_axis.set_xlabel("")
+    title = (
         f"Target visibility — {observatory_name} — {pd.Timestamp(night).date()} "
         f"(allocated: {_window_label(windows)})"
     )
-    ax.grid(alpha=.25, zorder=1)
-    ax.xaxis.set_major_locator(mdates.HourLocator(interval=1, tz=timezone))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=timezone))
-    ax.xaxis.set_minor_locator(mdates.MinuteLocator(byminute=[0, 15, 30, 45], tz=timezone))
-    ax.tick_params(axis="x")
+    # Both panels share the time axis, but keep tick labels visible on both.
+    for panel in (ax, altitude_bar_axis):
+        panel.xaxis.set_major_locator(mdates.HourLocator(interval=1, tz=timezone))
+        panel.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=timezone))
+        panel.xaxis.set_minor_locator(mdates.MinuteLocator(byminute=[15, 30, 45], tz=timezone))
+        panel.grid(axis="x", which="major", color="0.25", alpha=.42, linewidth=.75, zorder=2)
+        panel.grid(axis="x", which="minor", color="0.35", alpha=.24, linewidth=.25, zorder=2)
+    # Use the upper panel's bottom edge as the single shared time scale.
+    # Native shared-axis labels are disabled and drawn manually in the gap,
+    # which prevents Matplotlib from moving them to the bottom panel.
+    ax.tick_params(axis="x", which="both", bottom=True, labelbottom=False, top=False, labeltop=False)
+    altitude_bar_axis.tick_params(
+        axis="x", which="both", bottom=False, labelbottom=False,
+        top=True, labeltop=False, pad=1,
+    )
+    major_times = pd.date_range(
+        start=pd.Timestamp(local_times[0]).floor("h"),
+        end=pd.Timestamp(local_times[-1]).ceil("h"),
+        freq="1h",
+        tz=pd.Timestamp(local_times[0]).tz,
+    )
+    for timestamp in major_times:
+        if local_times[0] <= timestamp.to_pydatetime() <= local_times[-1]:
+            ax.text(
+                mdates.date2num(timestamp.to_pydatetime()), -.035,
+                timestamp.strftime("%H:%M"), transform=ax.get_xaxis_transform(),
+                ha="center", va="top", fontsize=8, clip_on=False, zorder=20,
+            )
+    ax.text(
+        -.095, -.012, f"Local time\n[{timezone.key}]", transform=ax.transAxes,
+        ha="center", va="top", multialignment="center", fontsize=7, clip_on=False, zorder=20,
+    )
+    # Emphasize half-hour grid lines over quarter-hour lines.
+    local_index = pd.DatetimeIndex(local_times)
+    for timestamp in local_index[local_index.minute.isin([15, 30, 45])].unique():
+        x = mdates.date2num(timestamp.to_pydatetime())
+        width = .52 if timestamp.minute == 30 else .25
+        for panel in (ax, altitude_bar_axis):
+            panel.axvline(x, color="0.25", alpha=.30, linewidth=width, zorder=2)
 
     airmass_axis = ax.twinx()
     altitude_ticks = np.array([90, 60, 45, 30, 20], dtype=float)
@@ -364,11 +465,14 @@ def plot_nightly_visibility(
     handles, labels = ax.get_legend_handles_labels()
     legend_items = len(handles) + len(twilight_handles) + len(allocation_handles)
     ncol = min(8, max(4, int(np.ceil(legend_items / 8))))
-    ax.legend(handles + twilight_handles + allocation_handles,
-              labels + [item.get_label() for item in twilight_handles + allocation_handles],
-              loc="upper center", bbox_to_anchor=(.5, -.18), ncol=ncol, fontsize=7, frameon=False)
-    legend_rows = np.ceil(legend_items / ncol)
-    fig.subplots_adjust(bottom=min(.38, .17 + .017 * legend_rows))
+    legend = fig.legend(
+        handles + twilight_handles + allocation_handles,
+        labels + [item.get_label() for item in twilight_handles + allocation_handles],
+        loc="upper center", bbox_to_anchor=(.5, .95), ncol=ncol,
+        fontsize=7, frameon=False, borderaxespad=0.,
+    )
+    fig.suptitle(title, y=.98, fontsize=10)
+    fig.subplots_adjust(hspace=.12, bottom=.18, top=.83, left=.08, right=.94)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=170, bbox_inches="tight", pad_inches=.08)
     plt.close(fig)

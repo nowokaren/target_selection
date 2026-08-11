@@ -64,9 +64,16 @@ def load_hsh_astrometry_catalog(path: str | Path) -> pd.DataFrame:
         data["imagetyp"].astype(str).str.strip().str.lower().eq("object")
         & data["astromet"].astype(str).str.strip().str.lower().eq("yes")
     ].copy()
-    science["source_target"] = science["object"].where(
-        science["object"].notna(), science.get("objname")
-    ).astype(str)
+    # ``objname`` is the curated event identifier.  ``object`` can contain
+    # legacy names from the original image inventory, so prefer ``objname``
+    # whenever it is present and non-empty, falling back to ``object``.
+    if "objname" in science:
+        curated_name = science["objname"].astype(str).str.strip()
+        valid_curated = ~curated_name.str.upper().isin({"", "NAN", "NONE", "NO_OBJECT"})
+        science["source_target"] = curated_name.where(valid_curated, science["object"])
+    else:
+        science["source_target"] = science["object"]
+    science["source_target"] = science["source_target"].astype(str).str.strip()
     science = science[~science["source_target"].str.upper().isin({"", "NAN", "NO_OBJECT"})]
     science["target_key"] = science["source_target"].map(canonical_target_name)
     science["mjd"] = pd.to_numeric(science["mjd-obs"], errors="coerce")

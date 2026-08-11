@@ -8,6 +8,7 @@ from target_selection_pipeline import (
     run_target_selection,
     save_target_reports,
     summarize_release_coverage,
+    _filter_invalid_mop_magnitudes,
 )
 
 
@@ -285,3 +286,10 @@ def test_pipeline_queries_visible_and_previously_observed_targets(tmp_path):
     observing_summary = pd.read_csv(paths["tables"] / "observing_selection_summary.csv")
     assert {"Target", "mag_now", "visible_hours", "visible_from", "visible_to"} <= set(observing_summary)
     assert (paths["tables"] / "observing_selection_summary.png").exists()
+
+
+def test_magnitude_cut_discards_faint_targets_but_keeps_missing_values():
+    targets = pd.DataFrame({"Target": ["bright", "faint", "unknown"], "mag_now": [16.0, 19.0, None]})
+    filtered, excluded = _filter_invalid_mop_magnitudes(targets, max_current_magnitude=18.0)
+    assert filtered["Target"].tolist() == ["bright", "unknown"]
+    assert excluded == 1

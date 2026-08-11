@@ -2,6 +2,7 @@ import pandas as pd
 
 from observatory_observations import (
     canonical_target_name,
+    load_hsh_astrometry_catalog,
     summarize_hsh_observations,
 )
 
@@ -42,3 +43,17 @@ def test_hsh_summary_counts_usable_images_by_stage_and_filter(tmp_path):
     assert row["hsh_n_I"] == 1
     assert row["hsh_n_V"] == 1
     assert summary.loc["unobserved", "hsh_quality_status"] == "not_observed"
+
+
+def test_hsh_loader_prefers_curated_objname(tmp_path):
+    catalogue = pd.DataFrame({
+        "object": ["OGLE-2024-GD-0006"],
+        "objname": ["OGLE-2024-BLG-0006"],
+        "imagetyp": ["object"], "astromet": ["yes"],
+        "obj_stat": ["OK"], "clmatch": [True], "mjd-obs": [60000.0],
+        "filter": ["I"], "exptime": [300.0], "airmass": [1.2],
+    })
+    path = tmp_path / "hsh.csv"
+    catalogue.to_csv(path, index=False)
+    loaded = load_hsh_astrometry_catalog(path)
+    assert loaded.loc[0, "source_target"] == "OGLE-2024-BLG-0006"

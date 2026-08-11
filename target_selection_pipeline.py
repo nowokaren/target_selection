@@ -60,13 +60,32 @@ def _load_additional_targets(targets: pd.DataFrame | str | Path | None) -> pd.Da
     ].drop_duplicates("Target", keep="first").reset_index(drop=True)
 
 
-def _filter_invalid_mop_magnitudes(targets: pd.DataFrame) -> tuple[pd.DataFrame, int]:
-    """Discard MOP candidates whose current magnitude is the invalid zero value."""
-    if targets.empty or "mag_now" not in targets:
-        return targets.copy(), 0
-    magnitude = pd.to_numeric(targets["mag_now"], errors="coerce")
+def _mop_magnitude_pass_mask(
+    targets: pd.DataFrame, max_current_magnitude: float | None = None,
+) -> pd.Series:
+    """Return the MOP magnitude-cut mask; missing magnitudes remain valid."""
+    if targets.empty:
+        return pd.Series(dtype=bool, index=targets.index)
+    columns = [name for name in ("mag_now", "mop_mag_now", "mag_now_x", "mag_now_y") if name in targets]
+    if not columns:
+        return pd.Series(True, index=targets.index)
+    magnitude = (
+        targets[columns].apply(pd.to_numeric, errors="coerce")
+        .bfill(axis=1).iloc[:, 0]
+    )
     invalid = magnitude.notna() & magnitude.le(0)
-    return targets.loc[~invalid].copy().reset_index(drop=True), int(invalid.sum())
+    passed = ~invalid
+    if max_current_magnitude is not None:
+        passed &= magnitude.isna() | magnitude.le(float(max_current_magnitude))
+    return passed.fillna(True).astype(bool)
+
+
+def _filter_invalid_mop_magnitudes(
+    targets: pd.DataFrame, max_current_magnitude: float | None = None,
+) -> tuple[pd.DataFrame, int]:
+    """Discard invalid or over-limit MOP magnitudes; retain missing magnitudes."""
+    passed = _mop_magnitude_pass_mask(targets, max_current_magnitude)
+    return targets.loc[passed].copy().reset_index(drop=True), int((~passed).sum())
 
 
 def _visibility_daily_targets(
@@ -956,6 +975,7 @@ def run_target_selection(
     overwrite_release_photometry: bool = False,
     hsh_image_catalog: str | Path | None = None,
     refresh_hsh_data: bool = False,
+    max_current_magnitude: float | None = None,
     hsh_peak_half_width_t_e: float = 0.3,
     hsh_event_half_width_t_e: float = 2.0,
     include_previously_observed: bool = True,
@@ -1019,6 +1039,7 @@ def run_target_selection(
     )
     refresh_mop_data = not reuse_cache or registry.needs_daily_refresh("MOP", "target_data")
     daily_path = paths["tables"] / "visible_targets_daily.csv"
+    initial_mop_path = paths["tables"] / "mop_targets_initial.csv"
     summary_path = paths["tables"] / "visible_summary.csv"
     analysis_targets_path = paths["tables"] / "analysis_targets.csv"
     queried_targets_path = paths["tables"] / "queried_targets.csv"
@@ -1027,7 +1048,10 @@ def run_target_selection(
     manifest_path = paths["run"] / "manifest.json"
     started = perf_counter()
 
-    daily_cache_available = reuse_cache and daily_path.exists() and not refresh_mop_data
+    daily_cache_available = (
+        reuse_cache and daily_path.exists() and not refresh_mop_data
+        and (max_current_magnitude is None or initial_mop_path.exists())
+    )
     if verbose:
         print("[1/5] Visible MOP targets" + (" (cache)" if daily_cache_available else ""), flush=True)
     if daily_cache_available:
@@ -1037,12 +1061,20 @@ def run_target_selection(
             observatory=observatory, start_date=start_date, end_date=end_date,
             sort_by_mag=False,
         )
-    daily, excluded_daily = _filter_invalid_mop_magnitudes(daily)
+    initial_mop = daily.copy()
+    initial_mop["passes_magnitude_cut"] = _mop_magnitude_pass_mask(initial_mop, max_current_magnitude)
+    initial_mop.to_csv(initial_mop_path, index=False)
+    daily, excluded_daily = _filter_invalid_mop_magnitudes(daily, max_current_magnitude)
     if excluded_daily and verbose:
-        print(f"      Excluded {excluded_daily} MOP candidate(s) with mag_now <= 0", flush=True)
+        print(f"      Excluded {excluded_daily} MOP candidate(s) by the magnitude cut", flush=True)
     daily.to_csv(daily_path, index=False)
 
-    summary_cache_available = reuse_cache and summary_path.exists() and not refresh_mop_data
+    # A non-default cut invalidates the old enriched summary cache unless the
+    # caller explicitly reruns the MOP enrichment.
+    summary_cache_available = (
+        reuse_cache and summary_path.exists() and not refresh_mop_data
+        and max_current_magnitude is None
+    )
     if verbose:
         print("[2/5] MOP parameters + photometry" + (" (cache)" if summary_cache_available else ""), flush=True)
     if summary_cache_available:
@@ -1057,7 +1089,7 @@ def run_target_selection(
             refresh_parameters=not reuse_cache,
         )
         visible_summary.to_csv(summary_path, index=False)
-    visible_summary, excluded_summary = _filter_invalid_mop_magnitudes(visible_summary)
+    visible_summary, excluded_summary = _filter_invalid_mop_magnitudes(visible_summary, max_current_magnitude)
     if excluded_summary and verbose and not excluded_daily:
         print(f"      Excluded {excluded_summary} MOP summary target(s) with mag_now <= 0", flush=True)
     if excluded_summary:
@@ -1089,7 +1121,7 @@ def run_target_selection(
             observed_only["mop_parameters_status"] = "unavailable"
             observed_only["mop_parameters_error"] = str(exc)
         observed_only["is_mop_visible_in_run"] = False
-        observed_only, excluded_observed = _filter_invalid_mop_magnitudes(observed_only)
+        observed_only, excluded_observed = _filter_invalid_mop_magnitudes(observed_only, max_current_magnitude)
         if excluded_observed and verbose:
             print(f"      Excluded {excluded_observed} previously observed target(s) with MOP mag_now <= 0", flush=True)
     visible_summary["is_user_supplied"] = False
@@ -1102,6 +1134,17 @@ def run_target_selection(
         user_targets["is_user_supplied"] = True
         registry.register_targets(user_targets, provider="USER")
     summary = pd.concat([visible_summary, observed_only, user_targets], ignore_index=True, sort=False)
+    magnitude_columns = [
+        column for column in ("mag_now", "mop_mag_now", "mag_now_x", "mag_now_y")
+        if column in summary
+    ]
+    if magnitude_columns:
+        # Keep one canonical magnitude column for visibility tables and plot
+        # labels, including HSH/JS targets enriched from MOP.
+        summary["mag_now"] = (
+            summary[magnitude_columns].apply(pd.to_numeric, errors="coerce")
+            .bfill(axis=1).iloc[:, 0]
+        )
     summary["is_previously_observed"] = summary["Target"].map(canonical_target_name).isin(observed_keys)
     summary["is_user_supplied"] = summary["Target"].map(canonical_target_name).isin(user_keys)
     summary = summary.dropna(subset=["RA_deg", "Dec_deg"]).drop_duplicates("Target", keep="first").reset_index(drop=True)
@@ -1593,6 +1636,7 @@ def run_target_selection(
         "observatory": observatory, "start_date": start_date, "end_date": end_date,
         "n_daily_rows": int(len(daily)), "n_targets": int(len(combined)),
         "n_mop_invalid_magnitude_excluded": int(excluded_daily + excluded_summary + excluded_observed),
+        "max_current_magnitude": None if max_current_magnitude is None else float(max_current_magnitude),
         "max_workers": int(max_workers), "reuse_cache": bool(reuse_cache),
         "cache_version": CACHE_VERSION,
         "target_report_version": TARGET_REPORT_VERSION,

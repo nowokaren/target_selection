@@ -65,6 +65,7 @@ Restart the kernel and select **Run All**. The main function is `run_target_sele
 - `reuse_cache=True`: reuse previous downloads and queries.
 - MOP candidates with `mag_now <= 0` are discarded before visibility selection, TAP, Butler, and report stages because this is an invalid current-magnitude value.
 - `overwrite_target_plots=False`: keep current reports and resume an interrupted report stage; set `True` only to regenerate every report.
+- `GENERATE_TARGET_REPORTS=False`: skip individual target dashboard PNGs when only aggregate MOP/HSH products are needed; set `True` to enable them.
 - `target_plotter=False`: skip individual reports.
 - `target_report_scope="all_queried"`: generate reports for every Rubin-query target; set `"visibility_selected"` to generate them only for targets that pass the local visibility filter on at least one requested night.
 - `visibility_target_scope="all_queried"`: evaluate every queried target on every requested night for `visibility_target_summary.csv` and nightly plots; set `"mop_daily"` to evaluate only MOP candidates returned for each night.
@@ -84,6 +85,7 @@ Restart the kernel and select **Run All**. The main function is `run_target_sele
 - `release_photometry_targets=[...]`: limit retrieval to named targets; `None` queries every selected target.
 - `overwrite_release_photometry=False`: reuse completed per-target caches; set `True` to refresh them.
 - `hsh_image_catalog=...`: optionally summarize previously processed HSH images for the selected targets.
+- `max_current_magnitude=...`: optionally exclude MOP targets brighter than the configured faint-limit value (for example `18.5` keeps `mag_now <= 18.5`). Targets without a MOP magnitude are retained; excluded candidates are recorded in `tables/mop_targets_initial.csv` with `passes_magnitude_cut=False`.
 - `hsh_peak_half_width_t_e=0.3` and `hsh_event_half_width_t_e=2.0`: configurable phase boundaries in Einstein-time units.
 - `include_previously_observed=True`: add all targets already stored from HSH/JS to the Rubin coverage query, even when MOP does not mark them visible in this date range.
 - `show_queried_targets=True`: print the complete source-labeled list sent to the Rubin coverage query.
