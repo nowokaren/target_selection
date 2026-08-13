@@ -120,6 +120,12 @@ combined, paths = run_target_selection(
 
 For tests or advanced configurations, explicitly pass `mop`, `tap_service`, `butler`, or a custom `target_plotter`.
 
+### Coordinate provenance and precision
+
+MOP event-page coordinates are authoritative. The pipeline preserves the original sexagesimal values in `mop_ra` and `mop_dec`, stores their full floating-point ICRS conversion in `mop_ra_deg` and `mop_dec_deg`, and copies those values without rounding into the canonical `RA_deg` and `Dec_deg` used by visibility, TAP, Butler, and photometry calculations. `coordinate_source`, `coordinate_priority`, `coordinate_offset_arcsec`, and `coordinate_was_overridden` make coordinate replacement auditable in the run tables.
+
+HSH `CRVAL1`/`CRVAL2` values are image WCS reference points, not event coordinates. They are retained only as `pointing_ra_deg` and `pointing_dec_deg` observation metadata and can never replace a MOP position. Caches and report versions include coordinates, so upgrading to this release automatically invalidates products calculated at a different position. Coordinate-copy notebook cells display three decimal places in sexagesimal notation; calculations always use the unrounded numeric values.
+
 ### Partial-night allocations
 
 Use `visibility_observing_windows` when only part of a night is assigned. The ISO date identifies the **evening on which the night begins**; times before noon belong to the following calendar day in the observatory's local timezone. The configuration is evaluated once per night and its mask is reused for every target.

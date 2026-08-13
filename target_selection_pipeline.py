@@ -24,8 +24,8 @@ from tqdm.std import tqdm
 from data_release_config import DataReleaseConfig, get_data_release
 
 
-CACHE_VERSION = 3
-TARGET_REPORT_VERSION = 11
+CACHE_VERSION = 4
+TARGET_REPORT_VERSION = 12
 
 
 def _safe_name(value: object) -> str:
@@ -88,13 +88,99 @@ def _filter_invalid_mop_magnitudes(
     return targets.loc[passed].copy().reset_index(drop=True), int((~passed).sum())
 
 
+def _has_mop_page_coordinates(targets: pd.DataFrame) -> bool:
+    """Return whether a cached MOP table contains authoritative page positions."""
+    required = {"mop_ra", "mop_dec", "mop_ra_deg", "mop_dec_deg"}
+    return required.issubset(targets.columns)
+
+
+def _apply_authoritative_mop_coordinates(targets: pd.DataFrame) -> pd.DataFrame:
+    """Use full-precision target-page coordinates whenever MOP supplied them."""
+    data = targets.copy()
+    if data.empty:
+        return data
+    def numeric_column(name: str) -> pd.Series:
+        if name not in data:
+            return pd.Series(np.nan, index=data.index, dtype=float)
+        return pd.to_numeric(data[name], errors="coerce")
+
+    old_ra = numeric_column("RA_deg")
+    old_dec = numeric_column("Dec_deg")
+    mop_ra = numeric_column("mop_ra_deg")
+    mop_dec = numeric_column("mop_dec_deg")
+    page_valid = mop_ra.between(0.0, 360.0, inclusive="left") & mop_dec.between(-90.0, 90.0)
+    old_valid = old_ra.between(0.0, 360.0, inclusive="left") & old_dec.between(-90.0, 90.0)
+
+    separation = pd.Series(np.nan, index=data.index, dtype=float)
+    comparable = page_valid & old_valid
+    if comparable.any():
+        ra1 = np.deg2rad(old_ra.loc[comparable].to_numpy(dtype=float))
+        dec1 = np.deg2rad(old_dec.loc[comparable].to_numpy(dtype=float))
+        ra2 = np.deg2rad(mop_ra.loc[comparable].to_numpy(dtype=float))
+        dec2 = np.deg2rad(mop_dec.loc[comparable].to_numpy(dtype=float))
+        cosine = (
+            np.sin(dec1) * np.sin(dec2)
+            + np.cos(dec1) * np.cos(dec2) * np.cos(ra1 - ra2)
+        )
+        separation.loc[comparable] = np.rad2deg(
+            np.arccos(np.clip(cosine, -1.0, 1.0))
+        ) * 3600.0
+
+    data["coordinate_offset_arcsec"] = separation
+    data["coordinate_was_overridden"] = (
+        page_valid & old_valid & separation.fillna(0.0).gt(1e-6)
+    )
+    data.loc[page_valid, "RA_deg"] = mop_ra.loc[page_valid].astype(float)
+    data.loc[page_valid, "Dec_deg"] = mop_dec.loc[page_valid].astype(float)
+    if "coordinate_source" not in data:
+        data["coordinate_source"] = pd.NA
+    if "coordinate_priority" not in data:
+        data["coordinate_priority"] = 0
+    data.loc[page_valid, "coordinate_source"] = "MOP target page"
+    data.loc[page_valid, "coordinate_priority"] = 100
+
+    visible = data.get(
+        "is_mop_visible_in_run", pd.Series(False, index=data.index)
+    )
+    visible = pd.Series(visible, index=data.index).fillna(False).astype(bool)
+    selection_only = visible & ~page_valid & old_valid
+    data.loc[selection_only, "coordinate_source"] = "MOP visibility table"
+    data.loc[selection_only, "coordinate_priority"] = 90
+    return data
+
+
 def _visibility_daily_targets(
     targets: pd.DataFrame, start_date: str, end_date: str, *, scope: str,
     mop_daily: pd.DataFrame,
 ) -> pd.DataFrame:
     """Return target/night rows used by local visibility calculations."""
     if scope == "mop_daily":
-        return mop_daily.copy()
+        # The daily visibility response determines membership by night, while
+        # the event-page coordinates determine every geometric calculation.
+        # Match by canonical name and replace the daily-table position without
+        # rounding whenever an enriched MOP page position is available.
+        from observatory_observations import canonical_target_name
+
+        daily = mop_daily.copy()
+        if daily.empty:
+            return daily
+        coordinate_columns = ["Target", "RA_deg", "Dec_deg"]
+        if "mag_now" in targets:
+            coordinate_columns.append("mag_now")
+        authoritative = targets[coordinate_columns].copy()
+        authoritative["_target_key"] = authoritative["Target"].map(canonical_target_name)
+        authoritative = authoritative.drop_duplicates("_target_key", keep="first")
+        daily["_target_key"] = daily["Target"].map(canonical_target_name)
+        daily = daily.merge(
+            authoritative.drop(columns="Target"), on="_target_key", how="left",
+            suffixes=("", "_authoritative"),
+        )
+        for column in ("RA_deg", "Dec_deg", "mag_now"):
+            replacement = f"{column}_authoritative"
+            if replacement in daily:
+                daily[column] = daily[replacement].combine_first(daily.get(column))
+                daily = daily.drop(columns=replacement)
+        return daily.drop(columns="_target_key")
     if scope != "all_queried":
         raise ValueError("visibility_target_scope must be 'all_queried' or 'mop_daily'.")
     columns = ["Target", "RA_deg", "Dec_deg"]
@@ -174,7 +260,7 @@ def _coverage_cache_key(targets: pd.DataFrame, release: DataReleaseConfig) -> st
     fields = targets[["Target", "RA_deg", "Dec_deg"]].copy()
     fields["Target"] = fields["Target"].astype(str)
     for column in ("RA_deg", "Dec_deg"):
-        fields[column] = pd.to_numeric(fields[column], errors="coerce").round(7)
+        fields[column] = pd.to_numeric(fields[column], errors="coerce")
     payload = {
         "release": release.name,
         "targets": fields.sort_values("Target").fillna("null").values.tolist(),
@@ -1038,6 +1124,13 @@ def run_target_selection(
         registry.observed_targets(providers=previously_observed_providers)
         if include_previously_observed else pd.DataFrame()
     )
+    # Databases created before the coordinate-provenance migration may contain
+    # an HSH image WCS reference point as a target position. Never reuse those
+    # legacy coordinates: MOP enrichment must replace them, or the target is
+    # omitted from coordinate-dependent work when MOP has no event page.
+    if not observed_targets.empty and "coordinate_source" in observed_targets:
+        legacy_coordinates = observed_targets["coordinate_source"].eq("legacy_unknown")
+        observed_targets.loc[legacy_coordinates, ["RA_deg", "Dec_deg"]] = np.nan
     refresh_mop_data = not reuse_cache or registry.needs_daily_refresh("MOP", "target_data")
     daily_path = paths["tables"] / "visible_targets_daily.csv"
     initial_mop_path = paths["tables"] / "mop_targets_initial.csv"
@@ -1076,6 +1169,11 @@ def run_target_selection(
         reuse_cache and summary_path.exists() and not refresh_mop_data
         and max_current_magnitude is None
     )
+    if summary_cache_available:
+        try:
+            summary_cache_available = _has_mop_page_coordinates(pd.read_csv(summary_path, nrows=1))
+        except (OSError, ValueError):
+            summary_cache_available = False
     if verbose:
         print("[2/5] MOP parameters + photometry" + (" (cache)" if summary_cache_available else ""), flush=True)
     if summary_cache_available:
@@ -1101,6 +1199,7 @@ def run_target_selection(
     # once per day and use the stored HSH/JS coordinates as a fallback.
     visible_summary = visible_summary.copy()
     visible_summary["is_mop_visible_in_run"] = True
+    visible_summary = _apply_authoritative_mop_coordinates(visible_summary)
     registry.register_targets(visible_summary, provider="MOP")
     from observatory_observations import canonical_target_name
     visible_keys = set(visible_summary["Target"].map(canonical_target_name))
@@ -1122,6 +1221,7 @@ def run_target_selection(
             observed_only["mop_parameters_status"] = "unavailable"
             observed_only["mop_parameters_error"] = str(exc)
         observed_only["is_mop_visible_in_run"] = False
+        observed_only = _apply_authoritative_mop_coordinates(observed_only)
         observed_only, excluded_observed = _filter_invalid_mop_magnitudes(observed_only, max_current_magnitude)
         if excluded_observed and verbose:
             print(f"      Excluded {excluded_observed} previously observed target(s) with MOP mag_now <= 0", flush=True)
@@ -1133,8 +1233,11 @@ def run_target_selection(
         user_targets["is_mop_visible_in_run"] = False
         user_targets["is_previously_observed"] = False
         user_targets["is_user_supplied"] = True
+        user_targets["coordinate_source"] = "USER"
+        user_targets["coordinate_priority"] = 80
         registry.register_targets(user_targets, provider="USER")
     summary = pd.concat([visible_summary, observed_only, user_targets], ignore_index=True, sort=False)
+    summary = _apply_authoritative_mop_coordinates(summary)
     magnitude_columns = [
         column for column in ("mag_now", "mop_mag_now", "mag_now_x", "mag_now_y")
         if column in summary
@@ -1149,7 +1252,10 @@ def run_target_selection(
     summary["is_previously_observed"] = summary["Target"].map(canonical_target_name).isin(observed_keys)
     summary["is_user_supplied"] = summary["Target"].map(canonical_target_name).isin(user_keys)
     summary = summary.dropna(subset=["RA_deg", "Dec_deg"]).drop_duplicates("Target", keep="first").reset_index(drop=True)
-    registry.register_targets(summary, provider="MOP")
+    authoritative_mop = pd.to_numeric(
+        summary.get("coordinate_priority"), errors="coerce"
+    ).eq(100)
+    registry.register_targets(summary.loc[authoritative_mop], provider="MOP")
     registry.mark_source("MOP", "target_data")
     summary.to_csv(analysis_targets_path, index=False)
 
@@ -1189,7 +1295,10 @@ def run_target_selection(
 
     queried_targets = summary[[
         column for column in [
-            "Target", "RA_deg", "Dec_deg", "is_mop_visible_in_run",
+            "Target", "RA_deg", "Dec_deg", "mop_ra", "mop_dec",
+            "mop_ra_deg", "mop_dec_deg", "coordinate_source",
+            "coordinate_priority", "coordinate_offset_arcsec",
+            "coordinate_was_overridden", "is_mop_visible_in_run",
             "is_previously_observed", "is_user_supplied",
         ] if column in summary
     ]].copy()
@@ -1219,12 +1328,32 @@ def run_target_selection(
             for start in range(0, len(names), 5):
                 print("        " + ", ".join(names[start:start + 5]), flush=True)
 
-    requested_target_keys = sorted(summary["Target"].map(canonical_target_name))
+    requested_coordinates = summary[["Target", "RA_deg", "Dec_deg"]].copy()
+    requested_coordinates["target_key"] = requested_coordinates["Target"].map(canonical_target_name)
+    requested_coordinates = requested_coordinates.sort_values("target_key").reset_index(drop=True)
 
     def target_cache_matches(path: Path) -> bool:
         try:
             cached_targets = pd.read_csv(path)
-            return sorted(cached_targets["Target"].map(canonical_target_name)) == requested_target_keys
+            required = {"Target", "RA_deg", "Dec_deg"}
+            if not required.issubset(cached_targets.columns):
+                return False
+            cached_targets = cached_targets[list(required)].copy()
+            cached_targets["target_key"] = cached_targets["Target"].map(canonical_target_name)
+            cached_targets = cached_targets.sort_values("target_key").reset_index(drop=True)
+            if cached_targets["target_key"].tolist() != requested_coordinates["target_key"].tolist():
+                return False
+            for column in ("RA_deg", "Dec_deg"):
+                cached_values = pd.to_numeric(cached_targets[column], errors="coerce").to_numpy()
+                requested_values = pd.to_numeric(
+                    requested_coordinates[column], errors="coerce"
+                ).to_numpy()
+                if not np.allclose(
+                    cached_values, requested_values, rtol=0.0, atol=1e-12,
+                    equal_nan=True,
+                ):
+                    return False
+            return True
         except (OSError, ValueError, KeyError):
             return False
 
@@ -1299,19 +1428,28 @@ def run_target_selection(
                 ]
             collection_key = str(release.butler_collections)
 
-            def cached_coadd_rows(target_name: str) -> pd.DataFrame:
+            def cached_coadd_rows(target_name: str, ra: float, dec: float) -> pd.DataFrame:
                 cached = load_target_release_photometry(persistent_cache_dir, target_name)
-                required = {"data_release", "butler_collection", "measurement_method"}
+                required = {
+                    "data_release", "butler_collection", "measurement_method",
+                    "RA_deg", "Dec_deg",
+                }
                 if cached.empty or not required.issubset(cached.columns):
                     return cached.iloc[0:0].copy()
+                cached_ra = pd.to_numeric(cached.get("RA_deg"), errors="coerce")
+                cached_dec = pd.to_numeric(cached.get("Dec_deg"), errors="coerce")
+                coordinate_match = np.isclose(cached_ra, float(ra), rtol=0.0, atol=1e-12) & np.isclose(
+                    cached_dec, float(dec), rtol=0.0, atol=1e-12
+                )
                 return cached.loc[
-                    (cached["data_release"].astype(str) == release.name)
+                    coordinate_match
+                    & (cached["data_release"].astype(str) == release.name)
                     & (cached["butler_collection"].astype(str) == collection_key)
                     & (cached["measurement_method"].astype(str) == "coadd_forced")
                 ].copy()
 
             cached_by_target = {
-                str(row.Target): cached_coadd_rows(str(row.Target))
+                str(row.Target): cached_coadd_rows(str(row.Target), row.RA_deg, row.Dec_deg)
                 for row in selected_targets.itertuples(index=False)
             }
             retry_statuses = {"coadd_query_error", "coadd_measurement_error"}
@@ -1338,7 +1476,7 @@ def run_target_selection(
                     ),
                 )
                 cached_by_target = {
-                    str(row.Target): cached_coadd_rows(str(row.Target))
+                    str(row.Target): cached_coadd_rows(str(row.Target), row.RA_deg, row.Dec_deg)
                     for row in selected_targets.itertuples(index=False)
                 }
             frames = [frame for frame in cached_by_target.values() if not frame.empty]
@@ -1368,21 +1506,30 @@ def run_target_selection(
                 ]
             collection_key = str(release.butler_collections)
 
-            def cached_rows_for_target(target_name: str) -> pd.DataFrame:
+            def cached_rows_for_target(target_name: str, ra: float, dec: float) -> pd.DataFrame:
                 cached = load_target_release_photometry(persistent_cache_dir, target_name)
                 if cached.empty:
                     return cached
-                required = {"data_release", "butler_collection", "measurement_method"}
+                required = {
+                    "data_release", "butler_collection", "measurement_method",
+                    "RA_deg", "Dec_deg",
+                }
                 if not required.issubset(cached.columns):
                     return cached.iloc[0:0].copy()
+                cached_ra = pd.to_numeric(cached.get("RA_deg"), errors="coerce")
+                cached_dec = pd.to_numeric(cached.get("Dec_deg"), errors="coerce")
+                coordinate_match = np.isclose(cached_ra, float(ra), rtol=0.0, atol=1e-12) & np.isclose(
+                    cached_dec, float(dec), rtol=0.0, atol=1e-12
+                )
                 return cached.loc[
-                    (cached["data_release"].astype(str) == release.name)
+                    coordinate_match
+                    & (cached["data_release"].astype(str) == release.name)
                     & (cached["butler_collection"].astype(str) == collection_key)
                     & (cached["measurement_method"].astype(str) == "dia_forced_catalog")
                 ].copy()
 
             cached_by_target = {
-                str(row.Target): cached_rows_for_target(str(row.Target))
+                str(row.Target): cached_rows_for_target(str(row.Target), row.RA_deg, row.Dec_deg)
                 for row in selected_targets.itertuples(index=False)
             }
             retry_statuses = {"tap_query_error"}
@@ -1408,7 +1555,7 @@ def run_target_selection(
                     ),
                 )
                 cached_by_target = {
-                    str(row.Target): cached_rows_for_target(str(row.Target))
+                    str(row.Target): cached_rows_for_target(str(row.Target), row.RA_deg, row.Dec_deg)
                     for row in selected_targets.itertuples(index=False)
                 }
             frames = [frame for frame in cached_by_target.values() if not frame.empty]
@@ -1607,7 +1754,10 @@ def run_target_selection(
             target.get("release_forced_n_requested", np.nan), errors="coerce",
         )
         mode = "forced" if pd.notna(forced_count) else "coverage_only"
-        return f"{TARGET_REPORT_VERSION}:{mode}"
+        return (
+            f"{TARGET_REPORT_VERSION}:{mode}:"
+            f"{float(target['RA_deg'])!r}:{float(target['Dec_deg'])!r}"
+        )
 
     report_targets = combined if target_report_scope == "all_queried" else combined.loc[
         combined["passes_visibility_filter"].astype(bool)

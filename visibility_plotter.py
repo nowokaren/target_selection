@@ -20,7 +20,7 @@ from astropy.time import Time
 from astropy.utils import iers
 
 
-VISIBILITY_PLOT_VERSION = 21
+VISIBILITY_PLOT_VERSION = 22
 
 
 OBSERVATORIES = {

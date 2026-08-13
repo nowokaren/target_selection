@@ -13,6 +13,20 @@ import pandas as pd
 from observatory_observations import canonical_target_name, load_hsh_astrometry_catalog
 
 
+COORDINATE_PRIORITIES = {
+    "MOP": 100,
+    "USER": 80,
+    "ANALYSIS": 0,
+    "HSH": 10,
+    "JS": 10,
+}
+
+
+def coordinate_priority(provider: str) -> int:
+    """Return the precedence assigned to target coordinates from one source."""
+    return COORDINATE_PRIORITIES.get(str(provider).upper(), 50)
+
+
 class TargetRegistry:
     """SQLite-backed registry shared by all target-selection runs.
 
@@ -40,6 +54,8 @@ class TargetRegistry:
                     preferred_name TEXT NOT NULL,
                     ra_deg REAL,
                     dec_deg REAL,
+                    coordinate_source TEXT,
+                    coordinate_priority INTEGER NOT NULL DEFAULT 0,
                     first_seen_utc TEXT NOT NULL,
                     last_seen_utc TEXT NOT NULL
                 );
@@ -113,6 +129,23 @@ class TargetRegistry:
                 );
                 """
             )
+            columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(targets)")
+            }
+            if "coordinate_source" not in columns:
+                connection.execute("ALTER TABLE targets ADD COLUMN coordinate_source TEXT")
+            if "coordinate_priority" not in columns:
+                connection.execute(
+                    "ALTER TABLE targets ADD COLUMN coordinate_priority INTEGER NOT NULL DEFAULT 0"
+                )
+            connection.execute(
+                """
+                UPDATE targets
+                SET coordinate_source=COALESCE(coordinate_source, 'legacy_unknown'),
+                    coordinate_priority=COALESCE(coordinate_priority, 0)
+                WHERE ra_deg IS NOT NULL OR dec_deg IS NOT NULL
+                """
+            )
 
     @staticmethod
     def _now() -> str:
@@ -123,6 +156,8 @@ class TargetRegistry:
         if targets.empty or "Target" not in targets:
             return
         now = self._now()
+        priority = coordinate_priority(provider)
+        source = str(provider).upper()
         records = []
         for row in targets.itertuples(index=False):
             values = row._asdict()
@@ -132,18 +167,46 @@ class TargetRegistry:
             key = canonical_target_name(name)
             ra = pd.to_numeric(values.get("RA_deg"), errors="coerce")
             dec = pd.to_numeric(values.get("Dec_deg"), errors="coerce")
-            records.append((key, name, float(ra) if pd.notna(ra) else None, float(dec) if pd.notna(dec) else None, now, now))
+            has_position = pd.notna(ra) and pd.notna(dec)
+            records.append((
+                key, name,
+                float(ra) if has_position else None,
+                float(dec) if has_position else None,
+                source if has_position else None,
+                priority if has_position else 0,
+                now, now,
+            ))
         if not records:
             return
         with self._connect() as connection:
             connection.executemany(
                 """
-                INSERT INTO targets(target_key, preferred_name, ra_deg, dec_deg, first_seen_utc, last_seen_utc)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO targets(
+                    target_key, preferred_name, ra_deg, dec_deg,
+                    coordinate_source, coordinate_priority, first_seen_utc, last_seen_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(target_key) DO UPDATE SET
                     preferred_name=excluded.preferred_name,
-                    ra_deg=COALESCE(excluded.ra_deg, targets.ra_deg),
-                    dec_deg=COALESCE(excluded.dec_deg, targets.dec_deg),
+                    ra_deg=CASE
+                        WHEN excluded.ra_deg IS NOT NULL AND (
+                            targets.ra_deg IS NULL
+                            OR excluded.coordinate_priority >= targets.coordinate_priority
+                        ) THEN excluded.ra_deg ELSE targets.ra_deg END,
+                    dec_deg=CASE
+                        WHEN excluded.dec_deg IS NOT NULL AND (
+                            targets.dec_deg IS NULL
+                            OR excluded.coordinate_priority >= targets.coordinate_priority
+                        ) THEN excluded.dec_deg ELSE targets.dec_deg END,
+                    coordinate_source=CASE
+                        WHEN excluded.ra_deg IS NOT NULL AND excluded.dec_deg IS NOT NULL AND (
+                            targets.ra_deg IS NULL OR targets.dec_deg IS NULL
+                            OR excluded.coordinate_priority >= targets.coordinate_priority
+                        ) THEN excluded.coordinate_source ELSE targets.coordinate_source END,
+                    coordinate_priority=CASE
+                        WHEN excluded.ra_deg IS NOT NULL AND excluded.dec_deg IS NOT NULL AND (
+                            targets.ra_deg IS NULL OR targets.dec_deg IS NULL
+                            OR excluded.coordinate_priority >= targets.coordinate_priority
+                        ) THEN excluded.coordinate_priority ELSE targets.coordinate_priority END,
                     last_seen_utc=excluded.last_seen_utc
                 """,
                 records,
@@ -201,12 +264,13 @@ class TargetRegistry:
         if not force and self.source_is_current("HSH", source_id, fingerprint):
             return 0
         observations = load_hsh_astrometry_catalog(path)
-        positions = observations.groupby("target_key", sort=False).agg(
+        # HSH CRVAL coordinates describe image pointings, not event positions.
+        # Register the identity only; an authoritative target provider supplies
+        # the canonical coordinates later.
+        identities = observations.groupby("target_key", sort=False).agg(
             Target=("source_target", "first"),
-            RA_deg=("ra_deg", "median"),
-            Dec_deg=("dec_deg", "median"),
         ).reset_index(drop=True)
-        self.register_targets(positions, provider="HSH")
+        self.register_targets(identities, provider="HSH")
         now = self._now()
         records = []
         for index, row in observations.iterrows():
@@ -216,6 +280,14 @@ class TargetRegistry:
                 "source_target": str(row["source_target"]),
                 "obj_stat": str(row.get("obj_stat", "")),
                 "astromet": str(row.get("astromet", "")),
+                "pointing_ra_deg": (
+                    float(row["pointing_ra_deg"])
+                    if pd.notna(row.get("pointing_ra_deg")) else None
+                ),
+                "pointing_dec_deg": (
+                    float(row["pointing_dec_deg"])
+                    if pd.notna(row.get("pointing_dec_deg")) else None
+                ),
             }
             records.append((
                 observation_id, "HSH", row["target_key"], str(row["source_target"]),
@@ -318,10 +390,12 @@ class TargetRegistry:
         placeholders = ",".join("?" for _ in providers)
         query = f"""
             SELECT t.preferred_name AS Target, t.ra_deg AS RA_deg, t.dec_deg AS Dec_deg,
+                   t.coordinate_source, t.coordinate_priority,
                    GROUP_CONCAT(DISTINCT o.provider) AS observatory_providers
             FROM targets t JOIN survey_observations o ON o.target_key=t.target_key
             WHERE o.provider IN ({placeholders})
-            GROUP BY t.target_key, t.preferred_name, t.ra_deg, t.dec_deg
+            GROUP BY t.target_key, t.preferred_name, t.ra_deg, t.dec_deg,
+                     t.coordinate_source, t.coordinate_priority
             ORDER BY t.preferred_name
         """
         with self._connect() as connection:
