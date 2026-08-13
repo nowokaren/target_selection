@@ -29,6 +29,12 @@ A role is semantic, not a file format. MOP remains a target provider even
 though it also supplies event parameters and photometry. HSH remains a
 follow-up survey even after photometry is added.
 
+### Coordinate authority
+
+Coordinates are normalized independently from target membership. An event may enter the union from MOP visibility, an HSH/JS observation inventory, or a user list, but a successful MOP event-page lookup is the authoritative position for that event. The adapter preserves MOP's sexagesimal strings and full floating-point ICRS values; the merge and registry use an explicit priority so adapter order cannot replace them with a lower-authority coordinate.
+
+The built-in precedence is MOP event page (100), MOP visibility table (90), user target list (80), other provider/reference coordinates (50), and follow-up survey coordinates (10). HSH `CRVAL1`/`CRVAL2` are not target coordinates at all: they remain observation-level `pointing_ra_deg`/`pointing_dec_deg` metadata. Legacy registry coordinates of unknown provenance are ignored until an authoritative source resolves them. Run tables expose the selected source, priority, original MOP strings, and any corrected angular offset. All geometry, TAP, Butler, visibility, and photometry operations use the unrounded canonical floats.
+
 ## What an adapter is
 
 An adapter is a small translation layer between a source-specific API, CSV, or

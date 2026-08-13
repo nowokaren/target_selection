@@ -168,12 +168,24 @@ class TargetRegistry:
             ra = pd.to_numeric(values.get("RA_deg"), errors="coerce")
             dec = pd.to_numeric(values.get("Dec_deg"), errors="coerce")
             has_position = pd.notna(ra) and pd.notna(dec)
+            row_priority = pd.to_numeric(
+                values.get("coordinate_priority"), errors="coerce"
+            )
+            effective_priority = (
+                int(row_priority) if pd.notna(row_priority) else priority
+            )
+            row_source = values.get("coordinate_source")
+            effective_source = (
+                str(row_source)
+                if row_source is not None and pd.notna(row_source)
+                else source
+            )
             records.append((
                 key, name,
                 float(ra) if has_position else None,
                 float(dec) if has_position else None,
-                source if has_position else None,
-                priority if has_position else 0,
+                effective_source if has_position else None,
+                effective_priority if has_position else 0,
                 now, now,
             ))
         if not records:
@@ -569,6 +581,7 @@ class TargetRegistry:
         """Return one compact row per target and source."""
         query = """
             SELECT t.preferred_name AS Target, t.ra_deg AS RA_deg, t.dec_deg AS Dec_deg,
+                   t.coordinate_source, t.coordinate_priority,
                    r.source_name, r.source_role, r.source_observed_at,
                    r.record_json, r.updated_utc
             FROM source_target_records r

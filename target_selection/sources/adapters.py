@@ -48,6 +48,8 @@ def _normalize_targets(data: pd.DataFrame, source_name: str) -> pd.DataFrame:
     normalized["RA_deg"] = pd.to_numeric(normalized["RA_deg"], errors="coerce")
     normalized["Dec_deg"] = pd.to_numeric(normalized["Dec_deg"], errors="coerce")
     normalized["target_source"] = source_name
+    normalized["coordinate_source"] = source_name
+    normalized["coordinate_priority"] = 80
     return (
         normalized.loc[
             normalized["Target"].ne("")
@@ -141,9 +143,14 @@ class MopTargetProvider:
             end_date=context.config.resolved_end_date,
             sort_by_mag=False,
         )
+        from target_selection_pipeline import _apply_authoritative_mop_coordinates
+
         if not bool(self.spec.options.get("enrich", True)):
-            return _normalize_targets(daily, self.spec.name)
-        return client.visibility_summary(
+            targets = _normalize_targets(daily, self.spec.name)
+            targets["coordinate_source"] = "MOP visibility table"
+            targets["coordinate_priority"] = 90
+            return targets
+        targets = client.visibility_summary(
             observatory=context.config.observatory,
             start_date=context.config.start_date,
             end_date=context.config.resolved_end_date,
@@ -154,7 +161,8 @@ class MopTargetProvider:
             parameter_cache_dir=context.cache_dir / "mop_event_cache",
             photometry_dir=context.cache_dir / "mop_photometry",
             refresh_parameters=context.config.cache.refresh_target_providers,
-        ).assign(target_source=self.spec.name)
+        ).assign(target_source=self.spec.name, is_mop_visible_in_run=True)
+        return _apply_authoritative_mop_coordinates(targets)
 
 
 class CsvTargetProvider:

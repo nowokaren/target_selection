@@ -16,7 +16,7 @@ It stores normalized information across runs:
 
 | Table | Contents |
 |---|---|
-| `targets` | Canonical target name and coordinates |
+| `targets` | Canonical target name, authoritative coordinates, source, and priority |
 | `target_aliases` | Alternative names used by different sources |
 | `source_target_records` | Latest source-specific snapshot and provenance |
 | `survey_observations` | HSH, JS, or other follow-up image epochs |

@@ -71,6 +71,12 @@ def _merge_targets(frames: list[pd.DataFrame]) -> pd.DataFrame:
         return pd.DataFrame(columns=["Target", "RA_deg", "Dec_deg"])
     merged = pd.concat(usable, ignore_index=True, sort=False)
     merged["target_key"] = merged["Target"].map(canonical_target_name)
+    merged["_input_order"] = range(len(merged))
+    merged["_coordinate_rank"] = (
+        pd.to_numeric(merged["coordinate_priority"], errors="coerce").fillna(0)
+        if "coordinate_priority" in merged
+        else 0
+    )
     source_columns = [
         name for name in ("target_source", "observatory_providers") if name in merged
     ]
@@ -85,9 +91,19 @@ def _merge_targets(frames: list[pd.DataFrame]) -> pd.DataFrame:
             )
         )
     )
-    merged = merged.drop_duplicates("target_key", keep="first")
+    # Select the complete row with the highest coordinate authority for each
+    # canonical event. This makes the result independent of adapter ordering;
+    # enriched MOP event-page positions rank above visibility-table, user, and
+    # follow-up survey coordinates.
+    merged = merged.sort_values(
+        ["target_key", "_coordinate_rank", "_input_order"],
+        ascending=[True, False, True],
+        kind="stable",
+    ).drop_duplicates("target_key", keep="first")
     merged["input_sources"] = merged["target_key"].map(sources)
-    return merged.drop(columns="target_key").reset_index(drop=True)
+    return merged.drop(
+        columns=["target_key", "_input_order", "_coordinate_rank"]
+    ).reset_index(drop=True)
 
 
 def _monitoring_layers(
@@ -251,6 +267,10 @@ class AnalysisWorkflow:
         observed_frames = [
             adapter.observed_targets(context) for adapter in followup_adapters
         ]
+        for frame in observed_frames:
+            if not frame.empty and "coordinate_source" in frame:
+                legacy = frame["coordinate_source"].eq("legacy_unknown")
+                frame.loc[legacy, ["RA_deg", "Dec_deg"]] = pd.NA
         for adapter, frame in zip(followup_adapters, observed_frames, strict=True):
             database.upsert_source_records(
                 frame,
@@ -258,6 +278,39 @@ class AnalysisWorkflow:
                 source_role="followup_survey",
             )
         additional_targets = _merge_targets([*additional_frames, *observed_frames])
+        if primary_mop is not None and not additional_targets.empty:
+            # Resolve user/follow-up target names against MOP before any
+            # coordinate-dependent calculation. A successful event-page match
+            # replaces every lower-authority position at full float precision.
+            from target_selection_pipeline import _apply_authoritative_mop_coordinates
+
+            additional_targets = mop_client.enrich_microlensing_parameters(
+                additional_targets,
+                errors="ignore",
+                max_workers=self.config.runtime.max_workers,
+                cache_dir=context.cache_dir / "mop_event_cache",
+                photometry_dir=context.cache_dir / "mop_photometry",
+                refresh=self.config.cache.refresh_target_providers,
+            )
+            additional_targets = _apply_authoritative_mop_coordinates(
+                additional_targets
+            )
+            mop_ra = (
+                pd.to_numeric(additional_targets["mop_ra_deg"], errors="coerce")
+                if "mop_ra_deg" in additional_targets
+                else pd.Series(pd.NA, index=additional_targets.index, dtype="Float64")
+            )
+            mop_dec = (
+                pd.to_numeric(additional_targets["mop_dec_deg"], errors="coerce")
+                if "mop_dec_deg" in additional_targets
+                else pd.Series(pd.NA, index=additional_targets.index, dtype="Float64")
+            )
+            page_coordinates = mop_ra.notna() & mop_dec.notna()
+            context.database.upsert_source_records(
+                additional_targets.loc[page_coordinates],
+                source_name=primary_mop.spec.name,
+                source_role="target_provider",
+            )
         followup_provider_names = tuple(
             str(getattr(adapter, "provider_name", adapter.spec.name)).upper()
             for adapter in followup_adapters
@@ -351,7 +404,12 @@ class AnalysisWorkflow:
             )
             if primary_mop is not None:
                 mop_rows = combined
-                if "is_mop_visible_in_run" in combined:
+                if {"mop_ra_deg", "mop_dec_deg"}.issubset(combined.columns):
+                    mop_rows = combined.loc[
+                        pd.to_numeric(combined["mop_ra_deg"], errors="coerce").notna()
+                        & pd.to_numeric(combined["mop_dec_deg"], errors="coerce").notna()
+                    ]
+                elif "is_mop_visible_in_run" in combined:
                     mop_rows = combined.loc[
                         combined["is_mop_visible_in_run"].fillna(False)
                     ]

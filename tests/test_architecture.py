@@ -3,7 +3,7 @@ import pandas as pd
 from target_registry import TargetRegistry
 from target_selection.config import AnalysisConfig, ProductSettings, SourceSpec
 from target_selection.sources import AdapterRegistry, default_adapter_registry
-from target_selection.workflow import AnalysisWorkflow
+from target_selection.workflow import AnalysisWorkflow, _merge_targets
 
 
 def test_normalized_config_selects_sources_by_name():
@@ -141,6 +141,8 @@ def test_registry_stores_source_records_photometry_and_runs(tmp_path):
     )
     catalog = registry.source_catalog()
     assert catalog.iloc[0]["source_name"] == "mop"
+    assert catalog.iloc[0]["coordinate_source"] == "MOP"
+    assert catalog.iloc[0]["coordinate_priority"] == 100
     assert "17.2" in catalog.iloc[0]["record_json"]
 
 
@@ -234,3 +236,63 @@ def test_csv_followup_adapter_imports_and_reuses_photometry(tmp_path):
     assert adapter.import_observations(context) == 2
     assert adapter.import_observations(context) == 0
     assert list(adapter.observed_targets(context)["Target"]) == ["OGLE-TEST"]
+
+
+def test_merge_targets_prefers_authoritative_mop_page_coordinates():
+    pointing = pd.DataFrame({
+        "Target": ["OGLE-2025-BLG-0451"],
+        "RA_deg": [269.563841528], "Dec_deg": [-19.998130225],
+        "coordinate_source": ["HSH"], "coordinate_priority": [10],
+        "target_source": ["casleo_hsh"],
+    })
+    mop = pd.DataFrame({
+        "Target": ["OGLE-2025-BLG-0451"],
+        "RA_deg": [269.54095833333326], "Dec_deg": [-19.978],
+        "mop_ra": ["17:58:09.830"], "mop_dec": ["-19:58:40.80"],
+        "coordinate_source": ["MOP target page"],
+        "coordinate_priority": [100], "target_source": ["mop"],
+    })
+
+    merged = _merge_targets([pointing, mop]).iloc[0]
+
+    assert merged["RA_deg"] == 269.54095833333326
+    assert merged["Dec_deg"] == -19.978
+    assert merged["coordinate_source"] == "MOP target page"
+    assert merged["input_sources"] == "casleo_hsh,mop"
+
+
+def test_mop_adapter_promotes_event_page_coordinates(tmp_path):
+    from target_selection.sources.adapters import MopTargetProvider
+    from target_selection.sources.base import SourceContext
+
+    class FakeMop:
+        def visible_targets(self, **kwargs):
+            return pd.DataFrame({
+                "Target": ["OGLE-2025-BLG-0451"],
+                "RA_deg": [269.563841528], "Dec_deg": [-19.998130225],
+                "observation_date": ["2026-08-01"],
+            })
+
+        def visibility_summary(self, *, daily_targets, **kwargs):
+            return daily_targets.assign(
+                mop_ra="17:58:09.830", mop_dec="-19:58:40.80",
+                mop_ra_deg=269.54095833333326, mop_dec_deg=-19.978,
+                mop_coordinate_source="target_page",
+            )
+
+    config = AnalysisConfig(
+        start_date="2026-08-01", output_dir=str(tmp_path),
+        target_providers=("mop",), followup_surveys=(), reference_surveys=(),
+        provider_specs={"mop": SourceSpec("mop", "mop")}, reference_specs={},
+    )
+    context = SourceContext(
+        config, TargetRegistry(tmp_path / "targets.sqlite"), tmp_path,
+        clients={"mop": FakeMop()},
+    )
+
+    target = MopTargetProvider(config.provider_specs["mop"]).collect_targets(context).iloc[0]
+
+    assert target["RA_deg"] == 269.54095833333326
+    assert target["Dec_deg"] == -19.978
+    assert target["coordinate_source"] == "MOP target page"
+    assert target["coordinate_priority"] == 100

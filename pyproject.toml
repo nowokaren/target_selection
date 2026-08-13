@@ -15,7 +15,7 @@ dependencies = [
   "tqdm>=4.66",
   "astropy>=6",
   "tomli>=2; python_version < '3.11'",
-  "mop-api @ git+https://github.com/nowokaren/mop_api.git@caaaf1be63cd38f04d7402818b4474e215469ad1",
+  "mop-api @ git+https://github.com/nowokaren/mop_api.git@069ee486518f514778b0b102e66bce866e6e6f2b",
 ]
 
 [project.scripts]
