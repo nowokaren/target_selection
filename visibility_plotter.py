@@ -20,7 +20,7 @@ from astropy.time import Time
 from astropy.utils import iers
 
 
-VISIBILITY_PLOT_VERSION = 22
+VISIBILITY_PLOT_VERSION = 23
 
 
 OBSERVATORIES = {
@@ -314,10 +314,15 @@ def plot_nightly_visibility(
     unique["RA_deg"] = pd.to_numeric(unique.get("RA_deg"), errors="coerce")
     unique["Dec_deg"] = pd.to_numeric(unique.get("Dec_deg"), errors="coerce")
     unique = unique.dropna(subset=["RA_deg", "Dec_deg"])
-    figure_height = max(8.5, 7.4 + .045 * len(unique))
+    # Give the altitude-bar panel enough physical height for one readable row
+    # per target. The previous capped GridSpec ratio compressed labels when a
+    # night contained many targets.
+    target_count = len(unique)
+    bar_panel_height = max(1.8, 0.24 * max(target_count, 1))
+    figure_height = max(8.5, 6.8 + bar_panel_height)
     fig, axes = plt.subplots(
         2, 1, figsize=(11.5, figure_height), sharex=True,
-        gridspec_kw={"height_ratios": (3.2, max(1.2, min(2.8, .12 * max(len(unique), 1))))},
+        gridspec_kw={"height_ratios": (5.0, bar_panel_height)},
     )
     ax, altitude_bar_axis = axes
 
@@ -340,18 +345,16 @@ def plot_nightly_visibility(
         for name in ("tab20", "tab20b", "tab20c")
     ])
     palette = palette[np.r_[np.arange(0, 60, 2), np.arange(1, 60, 2)]]
-    line_styles = ("-", "--", "-.")
     altitude_rows = []
     altitude_names = []
     for target_index, (_, row) in enumerate(unique.iterrows()):
         color = palette[target_index % len(palette)]
-        line_style = line_styles[(target_index // len(palette)) % len(line_styles)]
         coord = SkyCoord(float(row["RA_deg"]) * u.deg, float(row["Dec_deg"]) * u.deg)
         altitude = coord.transform_to(frame).alt.degree
         observable_minutes = pd.to_numeric(row.get("observable_minutes"), errors="coerce")
         if pd.isna(observable_minutes):
             observable_minutes = float(((altitude >= minimum_altitude) & eligible_time).sum() * time_step_minutes)
-        ax.plot(local_times, altitude, lw=1.35, ls=line_style, color=color,
+        ax.plot(local_times, altitude, lw=1.35, ls="-", color=color,
                 label=_visibility_target_label(row, observable_minutes), zorder=3)
         altitude_rows.append(np.asarray(altitude, dtype=float))
         altitude_names.append(str(row.get("Target", "Target")))
@@ -379,7 +382,9 @@ def plot_nightly_visibility(
             cmap=cmap, norm=norm, interpolation="nearest",
         )
         altitude_bar_axis.set_yticks(np.arange(len(altitude_names)))
-        altitude_bar_axis.set_yticklabels(altitude_names, fontsize=7)
+        altitude_bar_axis.set_yticklabels(
+            altitude_names, fontsize=8 if target_count <= 45 else 7
+        )
         altitude_bar_axis.set_ylabel("Targets", fontsize=8)
         altitude_bar_axis.set_xlabel(f"Local time\n[{timezone.key}]")
         altitude_bar_axis.grid(False)
