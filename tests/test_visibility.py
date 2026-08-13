@@ -1,11 +1,15 @@
 import matplotlib.image as mpimg
+from pathlib import Path
 import pandas as pd
 
 from visibility_plotter import (
     evaluate_nightly_visibility,
     get_observatory,
     observing_window_mask,
+    _visibility_line_style,
+    _visibility_source_group,
     _visibility_target_label,
+    _split_visibility_targets,
     plot_nightly_visibility,
     plot_visibility_sequence,
     save_nightly_visibility_plots,
@@ -146,6 +150,68 @@ def test_save_final_selected_plots(tmp_path):
         selected, tmp_path, time_step_minutes=60, verbose=False,
     )
     assert len(paths) == 2 and all(path.exists() for path in paths)
+
+
+def test_visibility_split_groups_sources_and_limits_parts_to_twenty():
+    mop_count = 25
+    hsh_count = 23
+    targets = pd.DataFrame({
+        "Target": [f"mop-{index}" for index in range(mop_count)]
+        + [f"hsh-{index}" for index in range(hsh_count)],
+        "RA_deg": [266.4] * (mop_count + hsh_count),
+        "Dec_deg": [-29.0] * (mop_count + hsh_count),
+        "is_mop_visible_in_run": [True] * mop_count + [False] * hsh_count,
+        "is_previously_observed": [False] * mop_count + [True] * hsh_count,
+    })
+
+    parts = _split_visibility_targets(targets, max_targets_per_plot=20)
+
+    assert [group for group, _ in parts] == [
+        "MOP-only", "MOP-only", "HSH/JS-observed", "HSH/JS-observed",
+    ]
+    assert [len(part) for _, part in parts] == [20, 5, 20, 3]
+    assert _visibility_source_group(parts[0][1].iloc[0]) == "MOP-only"
+    assert _visibility_source_group(parts[2][1].iloc[0]) == "HSH/JS-observed"
+    assert _visibility_line_style(parts[0][1].iloc[0], show_source_styles=True) == "-"
+    assert _visibility_line_style(parts[2][1].iloc[0], show_source_styles=True) == "--"
+    assert _visibility_line_style(parts[2][1].iloc[0], show_source_styles=False) == "-"
+
+
+def test_nightly_visibility_writes_source_aware_parts(tmp_path, monkeypatch):
+    import visibility_plotter as module
+
+    count = 24
+    daily = pd.DataFrame({
+        "observation_date": ["2026-08-01"] * count,
+        "Target": [f"target-{index}" for index in range(count)],
+        "RA_deg": [266.4] * count, "Dec_deg": [-29.0] * count,
+        "is_mop_visible_in_run": [True] * 12 + [False] * 12,
+        "is_previously_observed": [False] * 12 + [True] * 12,
+    })
+    selection = daily.assign(selected_for_visibility=True)
+    calls = []
+
+    def fake_plot(targets, night, output_path, **kwargs):
+        calls.append((len(targets), kwargs.get("part_label")))
+        Path(output_path).touch()
+
+    monkeypatch.setattr(module, "plot_nightly_visibility", fake_plot)
+    legacy = tmp_path / "2026-08-01_visibility.png"
+    legacy.touch()
+
+    paths = save_nightly_visibility_plots(
+        daily, "2026-08-01", "2026-08-01", tmp_path,
+        selection=selection, time_step_minutes=60, verbose=False,
+    )
+
+    assert len(paths) == 2
+    assert all(path.exists() for path in paths)
+    assert all("_part_" in path.name for path in paths)
+    assert not legacy.exists()
+    assert calls == [
+        (12, "MOP-only — part 1/2"),
+        (12, "HSH/JS-observed — part 2/2"),
+    ]
 
 
 def test_plot_visibility_sequence_pdf_and_format_override(tmp_path):

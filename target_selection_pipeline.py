@@ -165,8 +165,12 @@ def _visibility_daily_targets(
         if daily.empty:
             return daily
         coordinate_columns = ["Target", "RA_deg", "Dec_deg"]
-        if "mag_now" in targets:
-            coordinate_columns.append("mag_now")
+        coordinate_columns.extend(
+            column for column in (
+                "mag_now", "is_mop_visible_in_run", "is_previously_observed",
+                "observatory_providers", "input_sources", "target_source",
+            ) if column in targets
+        )
         authoritative = targets[coordinate_columns].copy()
         authoritative["_target_key"] = authoritative["Target"].map(canonical_target_name)
         authoritative = authoritative.drop_duplicates("_target_key", keep="first")
@@ -175,17 +179,29 @@ def _visibility_daily_targets(
             authoritative.drop(columns="Target"), on="_target_key", how="left",
             suffixes=("", "_authoritative"),
         )
-        for column in ("RA_deg", "Dec_deg", "mag_now"):
+        for column in coordinate_columns:
+            if column == "Target":
+                continue
             replacement = f"{column}_authoritative"
             if replacement in daily:
-                daily[column] = daily[replacement].combine_first(daily.get(column))
+                existing = daily[column] if column in daily else pd.Series(
+                    pd.NA, index=daily.index
+                )
+                daily[column] = daily[replacement].combine_first(existing)
                 daily = daily.drop(columns=replacement)
+        # Every daily MOP row is, by construction, a MOP-visible target even
+        # if it has no enriched event-page record.
+        daily["is_mop_visible_in_run"] = True
         return daily.drop(columns="_target_key")
     if scope != "all_queried":
         raise ValueError("visibility_target_scope must be 'all_queried' or 'mop_daily'.")
     columns = ["Target", "RA_deg", "Dec_deg"]
-    if "mag_now" in targets:
-        columns.append("mag_now")
+    columns.extend(
+        column for column in (
+            "mag_now", "is_mop_visible_in_run", "is_previously_observed",
+            "observatory_providers", "input_sources", "target_source",
+        ) if column in targets
+    )
     base = targets[columns].dropna(subset=["Target", "RA_deg", "Dec_deg"]).drop_duplicates("Target")
     nights = pd.date_range(start_date, end_date, freq="D").strftime("%Y-%m-%d")
     if base.empty or len(nights) == 0:

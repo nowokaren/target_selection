@@ -152,6 +152,8 @@ When only the schedule changes, set `OVERWRITE_VISIBILITY_PLOTS=True` while leav
 
 The automatic visibility plots contain only targets passing the configurable altitude and observable-time criteria. To make plots from a manually reviewed final selection without applying another filter:
 
+When more than 20 targets pass on one night, the automatic and manually selected nightly plots are split into numbered PNGs with at most 20 targets each. They are grouped first as `MOP-only`, then `HSH/JS-observed`, so the output names and titles make the source clear. If two source groups must appear in a single plot, MOP-only curves are solid and HSH/JS-observed curves are dashed; these styles are explained in the legend. Pass `max_targets_per_plot=...` to either save function to change the limit.
+
 ```python
 from visibility_plotter import (
     plot_selected_visibility,
