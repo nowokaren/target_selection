@@ -28,7 +28,7 @@ FORCED_PHOTOMETRY_COLUMNS = [
     "difference_flux_flag", "tract", "patch", "coadd_epoch_mjd",
     "epoch_definition",
 ]
-FORCED_PHOTOMETRY_VERSION = 4
+FORCED_PHOTOMETRY_VERSION = 5
 
 
 def _empty_forced_photometry() -> pd.DataFrame:

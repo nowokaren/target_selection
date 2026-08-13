@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mop-target-selection"
-version = "0.1.0"
+version = "0.1.1"
 description = "Select visible MOP microlensing targets with Rubin data-release coverage"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,7 +14,7 @@ dependencies = [
   "matplotlib>=3.7",
   "tqdm>=4.66",
   "astropy>=6",
-  "mop-api @ git+https://github.com/nowokaren/mop_api.git@28f8f87",
+  "mop-api @ git+https://github.com/nowokaren/mop_api.git@069ee486518f514778b0b102e66bce866e6e6f2b",
 ]
 
 [project.optional-dependencies]
