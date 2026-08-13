@@ -1,3 +1,4 @@
+import matplotlib.image as mpimg
 import pandas as pd
 
 from visibility_plotter import (
@@ -28,6 +29,26 @@ def test_plot_nightly_visibility(tmp_path):
     output = tmp_path / "night.png"
     plot_nightly_visibility(targets, "2026-08-01", output, time_step_minutes=30)
     assert output.exists() and output.stat().st_size > 0
+
+
+def test_nightly_plot_height_scales_with_target_count(tmp_path):
+    small = pd.DataFrame({
+        "Target": ["small-1", "small-2"],
+        "RA_deg": [266.4, 270.0], "Dec_deg": [-29.0, -30.0],
+    })
+    count = 55
+    large = pd.DataFrame({
+        "Target": [f"target-{index:02d}" for index in range(count)],
+        "RA_deg": [266.4 + 0.01 * index for index in range(count)],
+        "Dec_deg": [-29.0] * count,
+    })
+    small_path = tmp_path / "small.png"
+    large_path = tmp_path / "large.png"
+
+    plot_nightly_visibility(small, "2026-08-01", small_path, time_step_minutes=60)
+    plot_nightly_visibility(large, "2026-08-01", large_path, time_step_minutes=60)
+
+    assert mpimg.imread(large_path).shape[0] > 2 * mpimg.imread(small_path).shape[0]
 
 
 def test_save_one_plot_per_date_and_reuse(tmp_path):
