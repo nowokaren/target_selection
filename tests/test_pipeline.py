@@ -350,3 +350,22 @@ def test_mop_daily_visibility_uses_enriched_page_coordinates():
     assert result["RA_deg"] == 10.1234567890123
     assert result["Dec_deg"] == -20.1234567890123
     assert result["mag_now"] == 17.2
+
+
+def test_visibility_daily_targets_retains_source_provenance():
+    targets = pd.DataFrame({
+        "Target": ["mop", "hsh"],
+        "RA_deg": [10.0, 11.0], "Dec_deg": [-20.0, -21.0],
+        "is_mop_visible_in_run": [True, False],
+        "is_previously_observed": [False, True],
+        "observatory_providers": ["", "HSH"],
+    })
+
+    result = _visibility_daily_targets(
+        targets, "2026-08-01", "2026-08-01", scope="all_queried",
+        mop_daily=pd.DataFrame(),
+    ).set_index("Target")
+
+    assert result.loc["mop", "is_mop_visible_in_run"]
+    assert result.loc["hsh", "is_previously_observed"]
+    assert result.loc["hsh", "observatory_providers"] == "HSH"
