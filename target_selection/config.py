@@ -53,6 +53,7 @@ class SourceSpec:
 class SelectionSettings:
     """Frequently changed scientific and feasibility cuts."""
 
+    target_data_scope: str = "with_data"
     maximum_current_magnitude: float | None = None
     minimum_altitude_deg: float = 40.0
     minimum_observable_minutes: float = 90.0
@@ -65,6 +66,7 @@ class SelectionSettings:
 class ProductSettings:
     """Products enabled for an analysis run."""
 
+    observing_selection_summary: bool = True
     visibility_plots: bool = True
     sky_maps: bool = True
     monitoring_report: bool = True
@@ -111,6 +113,7 @@ class AnalysisConfig:
 
     start_date: str
     end_date: str | None = None
+    name: str = ""
     observatory: str = "El Leoncito"
     output_dir: str = "outputs"
     target_providers: tuple[str, ...] = ("mop",)
@@ -181,6 +184,10 @@ class AnalysisConfig:
             errors.append("minimum_observable_minutes must be non-negative")
         if self.selection.time_step_minutes < 1:
             errors.append("time_step_minutes must be positive")
+        if self.selection.target_data_scope not in {"with_data", "all"}:
+            errors.append('target_data_scope must be "with_data" or "all"')
+        if self.selection.visibility_target_scope not in {"all_queried", "mop_daily"}:
+            errors.append("visibility_target_scope must be \"all_queried\" or \"mop_daily\"")
         if self.runtime.max_workers < 1:
             errors.append("max_workers must be positive")
         if errors:
@@ -226,6 +233,7 @@ class AnalysisConfig:
         config = cls(
             start_date=str(run["start_date"]),
             end_date=str(run["end_date"]) if run.get("end_date") else None,
+            name=str(run.get("name", "")).strip(),
             observatory=str(run.get("observatory", "El Leoncito")),
             output_dir=str(run.get("output_dir", "outputs")),
             target_providers=_tuple(active.get("target_providers", tuple(providers))),

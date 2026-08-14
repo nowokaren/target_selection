@@ -53,9 +53,37 @@ def write_product_index(
             tables / "source_updates.csv",
             "Sources imported or refreshed for this run",
         ),
+        "targets_without_selected_data": (
+            tables / "targets_without_selected_data.csv",
+            "Targets excluded by the active target-data selection mode",
+        ),
+        "mop_candidates_without_data": (
+            tables / "mop_candidates_without_data.csv",
+            "MOP-visible candidates excluded because no event parameters or photometry were available",
+        ),
+        "sky_map": (
+            Path(paths.get("sky_plots", run / "sky_plots"))
+            / "sky_by_mag_and_hsh_points.png",
+            "Locally selected targets with HSH image data",
+        ),
+        "sky_bulge_zoom": (
+            Path(paths.get("sky_plots", run / "sky_plots"))
+            / "sky_bulge_zoom_mag_and_hsh_points.png",
+            "Bulge zoom for locally selected targets with HSH image data",
+        ),
+        "reference_sky_map": (
+            Path(paths.get("sky_plots", run / "sky_plots"))
+            / "sky_by_mag_and_visits.png",
+            "Locally selected targets with reference-survey visit coverage",
+        ),
+        "reference_sky_bulge_zoom": (
+            Path(paths.get("sky_plots", run / "sky_plots"))
+            / "sky_bulge_zoom_mag_and_visits.png",
+            "Bulge zoom for targets with reference-survey visit coverage",
+        ),
         "monitoring_report": (
             Path(paths.get("monitoring_reports", run / "monitoring_reports"))
-            / "monitoring_lightcurves.pdf",
+            / "lightcurves.pdf",
             "Provider light curves and follow-up/reference temporal coverage",
         ),
     }

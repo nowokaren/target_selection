@@ -9,9 +9,11 @@ from visibility_plotter import (
     _visibility_line_style,
     _visibility_source_group,
     _visibility_target_label,
+    _visibility_magnitude_label,
     _split_visibility_targets,
     plot_nightly_visibility,
     plot_visibility_sequence,
+    compile_visibility_plot_pages,
     save_nightly_visibility_plots,
     save_selected_visibility_plots,
     select_nightly_targets,
@@ -214,6 +216,24 @@ def test_nightly_visibility_writes_source_aware_parts(tmp_path, monkeypatch):
     ]
 
 
+
+def test_compile_visibility_plot_pages_uses_existing_nightly_pngs(tmp_path):
+    targets = pd.DataFrame({
+        "Target": ["MOP event", "HSH event"],
+        "RA_deg": [266.4, 270.0],
+        "Dec_deg": [-29.0, -30.0],
+        "mag_now": [17.4, 18.2],
+    })
+    first = tmp_path / "2026-08-01_part_01_mop-only_visibility.png"
+    second = tmp_path / "2026-08-01_part_02_hsh-js-observed_visibility.png"
+    plot_nightly_visibility(targets.iloc[[0]], "2026-08-01", first, time_step_minutes=60)
+    plot_nightly_visibility(targets.iloc[[1]], "2026-08-01", second, time_step_minutes=60)
+
+    result = compile_visibility_plot_pages(tmp_path, tmp_path / "visibility_sequence")
+
+    assert result.suffix == ".pdf"
+    assert result.exists() and result.stat().st_size > 0
+
 def test_plot_visibility_sequence_pdf_and_format_override(tmp_path):
     selected = pd.DataFrame({
         "observation_date": ["2026-08-01", "2026-08-01", "2026-08-02"],
@@ -234,6 +254,12 @@ def test_plot_visibility_sequence_pdf_and_format_override(tmp_path):
     assert png_path.suffix == ".png"
     assert png_path.exists() and png_path.stat().st_size > 0
 
+
+
+def test_visibility_magnitude_label_handles_missing_and_invalid_values():
+    assert _visibility_magnitude_label(pd.Series({"mag_now": 18.37})) == "18.4"
+    assert _visibility_magnitude_label(pd.Series({"mag_now": 0.0})) == "—"
+    assert _visibility_magnitude_label(pd.Series({"mag_now": float("nan")})) == "—"
 
 def test_visibility_legend_label_includes_hours_and_current_magnitude():
     row = pd.Series({"Target": "event", "mag_now": 18.37})

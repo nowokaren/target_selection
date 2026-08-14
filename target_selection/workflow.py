@@ -10,6 +10,7 @@ import pandas as pd
 
 from observatory_observations import canonical_target_name
 from target_registry import TargetRegistry
+from target_region import classify_target_region
 from target_selection.config import AnalysisConfig
 from target_selection.products import write_product_index
 from target_selection.sources import (
@@ -339,6 +340,8 @@ class AnalysisWorkflow:
                 provider_adapters,
                 additional_targets,
                 followup_provider_names,
+                mop_client=mop_client,
+                hsh_image_catalog=hsh_path,
             )
 
         for reference in references:
@@ -348,15 +351,23 @@ class AnalysisWorkflow:
                 self.config.resolved_end_date,
                 data_release=release,
                 root_dir=root,
+                run_name=self.config.name,
                 observatory=self.config.observatory,
                 mop=mop_client,
                 target_plotter=None if self.config.products.target_reports else False,
                 target_report_scope=self.config.products.target_report_scope,
                 visibility_target_scope=self.config.selection.visibility_target_scope,
+                target_data_scope=self.config.selection.target_data_scope,
+                target_data_observation_providers=followup_provider_names,
+                target_data_photometry_sources=(
+                    *tuple(adapter.spec.name for adapter in provider_adapters),
+                    *followup_provider_names,
+                ),
                 max_workers=self.config.runtime.max_workers,
                 reuse_cache=self.config.cache.reuse,
                 overwrite_target_plots=self.config.runtime.overwrite_target_reports,
                 generate_sky_maps=self.config.products.sky_maps,
+                generate_observing_selection_summary=self.config.products.observing_selection_summary,
                 sky_marker_encoding=self.config.products.marker_encoding,
                 show_coverage_background=self.config.products.coverage_background,
                 coverage_resolution=self.config.runtime.coverage_resolution,
@@ -432,7 +443,10 @@ class AnalysisWorkflow:
             result.source_updates.to_csv(
                 run_path / "tables" / "source_updates.csv", index=False
             )
-            database.source_catalog().to_csv(
+            source_catalog = database.source_catalog()
+            source_catalog.loc[
+                source_catalog["Target"].isin(combined["Target"])
+            ].to_csv(
                 run_path / "tables" / "source_catalog.csv",
                 index=False,
             )
@@ -455,8 +469,11 @@ class AnalysisWorkflow:
         provider_adapters: list[Any],
         additional_targets: pd.DataFrame,
         followup_provider_names: tuple[str, ...],
+        *,
+        mop_client: Any,
+        hsh_image_catalog: str | None,
     ) -> AnalysisResult:
-        from target_selection_pipeline import _observing_window_slug
+        from target_selection_pipeline import _observing_window_slug, _safe_name
         from visibility_plotter import (
             build_visibility_selection,
             save_nightly_visibility_plots,
@@ -482,6 +499,26 @@ class AnalysisWorkflow:
             )
         result.source_updates = pd.DataFrame(updates)
         targets = _merge_targets([*provider_frames, additional_targets])
+        from mop_photometry import split_mop_candidates_without_event_data
+        from target_selection.data_availability import select_targets_by_data_availability
+
+        targets, mop_candidates_without_data = split_mop_candidates_without_event_data(
+            targets, photometry_dir=context.cache_dir / "mop_photometry",
+        )
+        targets, targets_without_selected_data = select_targets_by_data_availability(
+            targets,
+            target_data_scope=self.config.selection.target_data_scope,
+            mop_photometry_dir=context.cache_dir / "mop_photometry",
+            include_mop_photometry=any(
+                adapter.spec.adapter.lower() == "mop" for adapter in provider_adapters
+            ),
+            database=context.database,
+            observation_providers=followup_provider_names,
+            photometry_sources=(
+                *tuple(adapter.spec.name for adapter in provider_adapters),
+                *followup_provider_names,
+            ),
+        )
         if not targets.empty:
             context.database.register_targets(targets, provider="analysis")
         date_label = (
@@ -489,20 +526,31 @@ class AnalysisWorkflow:
             if self.config.start_date == self.config.resolved_end_date
             else f"{self.config.start_date}_to_{self.config.resolved_end_date}"
         )
+        run_label = (
+            f"{_safe_name(self.config.name)}_" if self.config.name else ""
+        ) + (
+            f"{date_label}__{_observing_window_slug(self.config.selection.observing_windows)}"
+        )
         run_path = (
             Path(self.config.output_dir)
             / "planning_only"
-            / (
-                f"{date_label}__{_observing_window_slug(self.config.selection.observing_windows)}"
-            )
+            / run_label
         )
         paths = {
             "run": run_path,
             "tables": run_path / "tables",
             "visibility_plots": run_path / "visibility_plots",
+            "monitoring_reports": run_path / "monitoring_reports",
+            "sky_plots": run_path / "sky_plots",
         }
         for path in paths.values():
             path.mkdir(parents=True, exist_ok=True)
+        mop_candidates_without_data.to_csv(
+            paths["tables"] / "mop_candidates_without_data.csv", index=False
+        )
+        targets_without_selected_data.to_csv(
+            paths["tables"] / "targets_without_selected_data.csv", index=False
+        )
         nights = pd.date_range(
             self.config.start_date,
             self.config.resolved_end_date,
@@ -532,15 +580,86 @@ class AnalysisWorkflow:
             if not targets.empty
             else targets
         )
+        combined["target_region"] = combined["Target"].map(classify_target_region)
         combined.to_csv(paths["tables"] / "targets.csv", index=False)
         selection.to_csv(paths["tables"] / "visibility.csv", index=False)
         result.source_updates.to_csv(
             paths["tables"] / "source_updates.csv", index=False
         )
-        context.database.source_catalog().to_csv(
+        source_catalog = context.database.source_catalog()
+        source_catalog.loc[
+            source_catalog["Target"].isin(combined["Target"])
+        ].to_csv(
             paths["tables"] / "source_catalog.csv",
             index=False,
         )
+        if self.config.products.sky_maps and not combined.empty:
+            from target_selection_pipeline import plot_sky_dual_metric
+
+            sky_targets = combined.loc[
+                combined["passes_visibility_filter"].fillna(False).astype(bool)
+            ].copy()
+            if not sky_targets.empty:
+                if "mag_now" not in sky_targets:
+                    sky_targets["mag_now"] = float("nan")
+                hsh_epochs = context.database.observation_epochs(
+                    sky_targets, providers=("HSH",)
+                )
+                hsh_counts = hsh_epochs.groupby("Target", sort=False).size()
+                sky_targets["hsh_image_points"] = (
+                    sky_targets["Target"].map(hsh_counts).fillna(0).astype(int)
+                )
+                plot_sky_dual_metric(
+                    sky_targets,
+                    "mag_now",
+                    "hsh_image_points",
+                    paths["sky_plots"] / "sky_by_mag_and_hsh_points.png",
+                    title="Locally selected targets with HSH image data",
+                    left_label="MOP mag_now",
+                    right_label="HSH image epochs",
+                    marker_encoding=self.config.products.marker_encoding,
+                )
+                plot_sky_dual_metric(
+                    sky_targets,
+                    "mag_now",
+                    "hsh_image_points",
+                    paths["sky_plots"] / "sky_bulge_zoom_mag_and_hsh_points.png",
+                    title="Galactic bulge zoom — targets with HSH image data",
+                    left_label="MOP mag_now",
+                    right_label="HSH image epochs",
+                    bulge_zoom=(20, 12),
+                    marker_encoding=self.config.products.marker_encoding,
+                )
+        if self.config.products.observing_selection_summary:
+            from observing_selection_summary import (
+                build_observing_selection_summary,
+                save_observing_selection_summary,
+            )
+
+            planning_summary = build_observing_selection_summary(
+                combined, pd.DataFrame(), context.cache_dir / "mop_photometry",
+                hsh_image_catalog=hsh_image_catalog,
+                release_visit_exptime_s=None, include_reference=False,
+            )
+            save_observing_selection_summary(
+                planning_summary,
+                paths["tables"] / "observing_selection_summary.csv",
+                paths["tables"] / "observing_selection_summary.png",
+                release_name=None, release_visit_exptime_s=None,
+                include_reference=False,
+            )
+        if self.config.products.monitoring_report:
+            from monitoring_report import create_monitoring_report
+
+            create_monitoring_report(
+                combined, paths["monitoring_reports"] / "lightcurves.pdf",
+                mop=mop_client, mop_photometry_dir=context.cache_dir / "mop_photometry",
+                observatory_epochs=context.database.observation_epochs(combined),
+                observatory_photometry=context.database.photometry(combined),
+                data_release="No reference survey",
+                layers=_monitoring_layers(self.config, followup_provider_names),
+                plots_per_page=self.config.runtime.monitoring_plots_per_page,
+            )
         if self.config.products.visibility_plots and not daily.empty:
             save_nightly_visibility_plots(
                 daily,

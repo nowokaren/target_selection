@@ -22,6 +22,7 @@ import pandas as pd
 from tqdm.std import tqdm
 
 from data_release_config import DataReleaseConfig, get_data_release
+from target_region import classify_target_region
 
 
 CACHE_VERSION = 4
@@ -250,10 +251,13 @@ def create_run_structure(
     root_dir: str | Path, start_date: str, end_date: str,
     data_release: str | DataReleaseConfig = "DP2",
     observing_windows=None,
+    run_name: str = "",
 ) -> dict[str, Path]:
     """Create and return the folders used by one analysis run."""
     date_label = start_date if start_date == end_date else f"{start_date}_to_{end_date}"
     label = f"{date_label}__{_observing_window_slug(observing_windows)}"
+    if str(run_name).strip():
+        label = f"{_safe_name(str(run_name))}_{label}"
     release = get_data_release(data_release)
     base_dir = Path(root_dir) if release.name == "DP2" else Path(root_dir) / _safe_name(release.name)
     run_dir = base_dir / label
@@ -408,6 +412,14 @@ def save_target_summary(
     """Save a compact per-target science/coverage table as CSV and PNG."""
     targets = targets.reset_index(drop=True)
     result = pd.DataFrame({"Target": targets["Target"].astype(str)})
+    result["target_region"] = (
+        targets["target_region"].fillna("").astype(str)
+        if "target_region" in targets else targets["Target"].map(classify_target_region)
+    )
+    missing_region = result["target_region"].eq("")
+    result.loc[missing_region, "target_region"] = targets.loc[
+        missing_region, "Target"
+    ].map(classify_target_region)
     result["priority"] = False
     for column in ("tap_priority", "tap_priority_longte", "mop_tap_priority", "mop_tap_priority_longte"):
         if column in targets:
@@ -451,7 +463,7 @@ def save_target_summary(
     result.to_csv(csv_path, index=False)
 
     display_columns = [
-        "Target", "priority", "release_n_visits", *[f"n_visits_{c.removeprefix('coverage_n_visits_')}" for c in band_columns],
+        "Target", "target_region", "priority", "release_n_visits", *[f"n_visits_{c.removeprefix('coverage_n_visits_')}" for c in band_columns],
         "mop_photometry_points", "release_forced_photometry_points", "t_E_days", "t_0_HJD", "u_0", "mag_now", "min_airmass", "visible_nights",
     ]
     display = result[display_columns].copy()
@@ -476,7 +488,7 @@ def save_target_summary(
     for column in display.columns:
         display[column] = display[column].map(lambda value, name=column: format_cell(value, name))
     header_labels = {
-        "Target": "Target", "priority": "Priority", "release_n_visits": "tot",
+        "Target": "Target", "target_region": "Region", "priority": "Priority", "release_n_visits": "tot",
         "mop_photometry_points": "MOP\nphot.",
         "release_forced_photometry_points": f"{release_name}\nphot.",
         "t_E_days": "t_E\n[days]", "t_0_HJD": "t_0\n[HJD]", "u_0": "u_0",
@@ -598,7 +610,7 @@ def plot_sky_dual_metric(
     from astropy.coordinates import SkyCoord
     import astropy.units as u
     from matplotlib.path import Path as MarkerPath
-    from matplotlib.colors import Normalize
+    from matplotlib.colors import Normalize, LinearSegmentedColormap
 
     data = targets.dropna(subset=["RA_deg", "Dec_deg"]).reset_index(drop=True)
     data["_reference_number"] = np.arange(1, len(data) + 1)
@@ -709,7 +721,7 @@ def plot_sky_dual_metric(
                 max(3, int(round(full_lat_bins * 2 * bulge_zoom[1] / 180))),
             )
             grid_extent = (-bulge_zoom[0], bulge_zoom[0], -bulge_zoom[1], bulge_zoom[1])
-        from matplotlib.colors import LinearSegmentedColormap, LogNorm
+        from matplotlib.colors import LogNorm
         muted_greys = LinearSegmentedColormap.from_list(
             "muted_greys", plt.get_cmap("Greys")(np.linspace(.38, .95, 256)),
         )
@@ -723,8 +735,14 @@ def plot_sky_dual_metric(
     marker_size = 34
     left_array = left_values.to_numpy(dtype=float)
     right_array = right_values.to_numpy(dtype=float)
-    left_cmap = plt.get_cmap("Blues").copy()
-    right_cmap = plt.get_cmap("Greens").copy()
+    # Trim the white ends of the sequential maps so the minimum positive
+    # value is still visibly colored in every sky product.
+    left_cmap = LinearSegmentedColormap.from_list(
+        "target_blues", plt.get_cmap("Blues")(np.linspace(.35, .95, 256))
+    )
+    right_cmap = LinearSegmentedColormap.from_list(
+        "target_greens", plt.get_cmap("Greens")(np.linspace(.35, .95, 256))
+    )
 
     def positive_norm(values):
         positive = values[np.isfinite(values) & (values > 0)]
@@ -1053,6 +1071,7 @@ def run_target_selection(
     *,
     data_release: str | DataReleaseConfig = "DP2",
     root_dir: str | Path = "outputs",
+    run_name: str = "",
     observatory: str = "El Leoncito",
     mop=None,
     tap_service=None,
@@ -1060,10 +1079,14 @@ def run_target_selection(
     target_plotter: Callable | bool | None = None,
     target_report_scope: str = "all_queried",
     visibility_target_scope: str = "all_queried",
+    target_data_scope: str = "with_data",
+    target_data_observation_providers: Iterable[str] | None = None,
+    target_data_photometry_sources: Iterable[str] = (),
     max_workers: int = 4,
     reuse_cache: bool = True,
     overwrite_target_plots: bool = False,
     generate_sky_maps: bool = True,
+    generate_observing_selection_summary: bool = True,
     sky_marker_encoding: str = "split_color",
     show_coverage_background: bool = False,
     coverage_resolution: int = 19,
@@ -1111,10 +1134,20 @@ def run_target_selection(
         raise TypeError("target_plotter must be callable, False, or None.")
     if target_report_scope not in {"all_queried", "visibility_selected"}:
         raise ValueError("target_report_scope must be 'all_queried' or 'visibility_selected'.")
+    from target_selection.data_availability import normalize_target_data_scope
+    target_data_scope = normalize_target_data_scope(target_data_scope)
     if visibility_target_scope not in {"all_queried", "mop_daily"}:
         raise ValueError("visibility_target_scope must be 'all_queried' or 'mop_daily'.")
     previously_observed_providers = tuple(
         str(provider).upper() for provider in previously_observed_providers
+    )
+    if target_data_observation_providers is None:
+        target_data_observation_providers = previously_observed_providers
+    target_data_observation_providers = tuple(
+        str(provider).upper() for provider in target_data_observation_providers
+    )
+    target_data_photometry_sources = tuple(
+        str(source) for source in target_data_photometry_sources
     )
     user_targets = _load_additional_targets(additional_targets)
     end_date = end_date or start_date
@@ -1125,6 +1158,7 @@ def run_target_selection(
     paths = create_run_structure(
         root_dir, start_date, end_date, release,
         observing_windows=visibility_observing_windows,
+        run_name=run_name,
     )
     from target_registry import TargetRegistry
     registry_path = (
@@ -1152,6 +1186,8 @@ def run_target_selection(
     initial_mop_path = paths["tables"] / "mop_targets_initial.csv"
     summary_path = paths["tables"] / "visible_summary.csv"
     analysis_targets_path = paths["tables"] / "analysis_targets.csv"
+    mop_candidates_without_data_path = paths["tables"] / "mop_candidates_without_data.csv"
+    targets_without_selected_data_path = paths["tables"] / "targets_without_selected_data.csv"
     queried_targets_path = paths["tables"] / "queried_targets.csv"
     coverage_path = paths["tables"] / "coverage_raw.csv"
     coverage_targets_path = paths["tables"] / "coverage_targets.csv"
@@ -1266,6 +1302,65 @@ def run_target_selection(
             .bfill(axis=1).iloc[:, 0]
         )
     summary["is_previously_observed"] = summary["Target"].map(canonical_target_name).isin(observed_keys)
+    from mop_photometry import split_mop_candidates_without_event_data
+
+    summary, mop_candidates_without_data = split_mop_candidates_without_event_data(
+        summary, photometry_dir=Path(root_dir) / "mop_photometry",
+    )
+    from target_selection.data_availability import select_targets_by_data_availability
+
+    summary, targets_without_selected_data = select_targets_by_data_availability(
+        summary,
+        target_data_scope=target_data_scope,
+        mop_photometry_dir=Path(root_dir) / "mop_photometry",
+        include_mop_photometry=True,
+        database=registry,
+        observation_providers=target_data_observation_providers,
+        photometry_sources=target_data_photometry_sources,
+    )
+    targets_without_selected_data.to_csv(
+        targets_without_selected_data_path, index=False
+    )
+    if len(targets_without_selected_data) and verbose:
+        print(
+            f"      Excluded {len(targets_without_selected_data)} target(s) without data from active sources",
+            flush=True,
+        )
+    mop_catalog = summary.loc[
+        summary["is_mop_visible_in_run"].fillna(False).astype(bool)
+    ].copy()
+    mop_catalog.to_csv(summary_path, index=False)
+    mop_candidates_without_data.to_csv(mop_candidates_without_data_path, index=False)
+    if len(mop_candidates_without_data) and verbose:
+        print(
+            f"      Excluded {len(mop_candidates_without_data)} MOP candidate(s) without parameters or photometry",
+            flush=True,
+        )
+
+    excluded_keys = set(mop_candidates_without_data["Target"].map(canonical_target_name))
+    excluded_keys.update(
+        targets_without_selected_data["Target"].map(canonical_target_name)
+    )
+    availability = mop_catalog[["Target", "has_mop_parameters", "mop_photometry_points", "has_mop_event_data"]].copy()
+    availability["_target_key"] = availability["Target"].map(canonical_target_name)
+    availability = availability.drop_duplicates("_target_key", keep="first").set_index("_target_key")
+    initial_mop["_target_key"] = initial_mop["Target"].map(canonical_target_name)
+    initial_mop = initial_mop.loc[
+        ~initial_mop["_target_key"].isin(excluded_keys)
+    ].copy()
+    for column in ("has_mop_parameters", "mop_photometry_points", "has_mop_event_data"):
+        initial_mop[column] = initial_mop["_target_key"].map(availability[column])
+    initial_mop["included_in_analysis"] = initial_mop["_target_key"].map(
+        availability["has_mop_event_data"]
+    ).eq(True)
+    initial_mop = initial_mop.drop(columns="_target_key")
+    initial_mop.to_csv(initial_mop_path, index=False)
+
+    if excluded_keys:
+        daily = daily.loc[
+            ~daily["Target"].map(canonical_target_name).isin(excluded_keys)
+        ].copy()
+        daily.to_csv(daily_path, index=False)
     summary["is_user_supplied"] = summary["Target"].map(canonical_target_name).isin(user_keys)
     summary = summary.dropna(subset=["RA_deg", "Dec_deg"]).drop_duplicates("Target", keep="first").reset_index(drop=True)
     authoritative_mop = pd.to_numeric(
@@ -1673,6 +1768,7 @@ def run_target_selection(
     combined = summary.merge(coverage_summary, on="Target", how="left")
     combined = combined.merge(visibility_target_summary, on="Target", how="left")
     combined["passes_visibility_filter"] = combined["passes_visibility_filter"].astype("boolean").fillna(False).astype(bool)
+    combined["target_region"] = combined["Target"].map(classify_target_region)
     if generate_release_photometry:
         from release_photometry import summarize_release_forced_photometry
         forced_summary = summarize_release_forced_photometry(forced_photometry)
@@ -1693,28 +1789,29 @@ def run_target_selection(
             hsh_summary, paths["tables"] / "hsh_observation_summary.csv",
         )
         combined = combined.merge(hsh_summary, on="Target", how="left")
-    from observing_selection_summary import (
-        build_observing_selection_summary,
-        save_observing_selection_summary,
-    )
-    if verbose:
-        print("      Observing selection summary", flush=True)
-    observing_selection_summary = build_observing_selection_summary(
-        combined, coverage_rows, Path(root_dir) / "mop_photometry",
-        hsh_image_catalog=hsh_image_catalog,
-        release_visit_exptime_s=release.default_visit_exptime_s,
-        peak_half_width_t_e=hsh_peak_half_width_t_e,
-        event_half_width_t_e=hsh_event_half_width_t_e,
-    )
-    save_observing_selection_summary(
-        observing_selection_summary,
-        paths["tables"] / "observing_selection_summary.csv",
-        paths["tables"] / "observing_selection_summary.png",
-        release_name=release.name,
-        release_visit_exptime_s=release.default_visit_exptime_s,
-        peak_half_width_t_e=hsh_peak_half_width_t_e,
-        event_half_width_t_e=hsh_event_half_width_t_e,
-    )
+    if generate_observing_selection_summary:
+        from observing_selection_summary import (
+            build_observing_selection_summary,
+            save_observing_selection_summary,
+        )
+        if verbose:
+            print("      Observing selection summary", flush=True)
+        observing_selection_summary = build_observing_selection_summary(
+            combined, coverage_rows, Path(root_dir) / "mop_photometry",
+            hsh_image_catalog=hsh_image_catalog,
+            release_visit_exptime_s=release.default_visit_exptime_s,
+            peak_half_width_t_e=hsh_peak_half_width_t_e,
+            event_half_width_t_e=hsh_event_half_width_t_e,
+        )
+        save_observing_selection_summary(
+            observing_selection_summary,
+            paths["tables"] / "observing_selection_summary.csv",
+            paths["tables"] / "observing_selection_summary.png",
+            release_name=release.name,
+            release_visit_exptime_s=release.default_visit_exptime_s,
+            peak_half_width_t_e=hsh_peak_half_width_t_e,
+            event_half_width_t_e=hsh_event_half_width_t_e,
+        )
     combined.to_csv(paths["tables"] / "combined_targets.csv", index=False)
     save_target_summary(
         combined, photometry_dir=Path(root_dir) / "mop_photometry",
@@ -1731,18 +1828,19 @@ def run_target_selection(
         report_photometry = registry.photometry(combined)
         create_monitoring_report(
             combined,
-            paths["monitoring_reports"] / "monitoring_lightcurves.pdf",
+            paths["monitoring_reports"] / "lightcurves.pdf",
             mop=mop, mop_photometry_dir=Path(root_dir) / "mop_photometry",
             lsst_coverage=coverage_rows, observatory_epochs=report_epochs,
             observatory_photometry=report_photometry, data_release=release.name, layers=monitoring_layers,
             plots_per_page=monitoring_report_plots_per_page,
         )
 
-    if generate_sky_maps and {"coverage_n_visits", "mag_now"}.issubset(combined.columns):
+    sky_targets = combined.loc[combined["passes_visibility_filter"].astype(bool)].copy()
+    if generate_sky_maps and {"coverage_n_visits", "mag_now"}.issubset(sky_targets.columns):
         plot_sky_dual_metric(
-            combined, "mag_now", "coverage_n_visits",
+            sky_targets, "mag_now", "coverage_n_visits",
             paths["sky_plots"] / "sky_by_mag_and_visits.png",
-            title=f"MOP targets with {release.name} coverage",
+            title=f"Locally selected targets with {release.name} coverage",
             left_label="MOP mag_now", right_label=f"{release.name} visits",
             marker_encoding=sky_marker_encoding,
             coverage_background=visit_centers,
@@ -1750,9 +1848,9 @@ def run_target_selection(
             coverage_label=f"{release.name} visits",
         )
         plot_sky_dual_metric(
-            combined, "mag_now", "coverage_n_visits",
+            sky_targets, "mag_now", "coverage_n_visits",
             paths["sky_plots"] / "sky_bulge_zoom_mag_and_visits.png",
-            title=f"Galactic bulge zoom — MOP + {release.name}",
+            title=f"Galactic bulge zoom — selected targets + {release.name}",
             left_label="MOP mag_now", right_label=f"{release.name} visits",
             bulge_zoom=(20, 12),
             marker_encoding=sky_marker_encoding,
@@ -1822,6 +1920,10 @@ def run_target_selection(
         "visibility_time_step_minutes": int(visibility_time_step_minutes),
         "visibility_observing_windows": visibility_observing_windows,
         "visibility_target_scope": visibility_target_scope,
+        "target_data_scope": target_data_scope,
+        "target_data_observation_providers": list(target_data_observation_providers),
+        "target_data_photometry_sources": list(target_data_photometry_sources),
+        "n_targets_without_selected_data": int(len(targets_without_selected_data)),
         "previously_observed_providers": list(previously_observed_providers),
         "additional_targets": (
             None if additional_targets is None

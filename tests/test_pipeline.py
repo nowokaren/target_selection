@@ -27,6 +27,12 @@ def test_run_directory_includes_observing_schedule(tmp_path):
     )
     assert varied["run"].name.startswith("2026-08-09_to_2026-08-12__obs_18-00_to_06-00_varied-")
 
+    named = create_run_structure(
+        tmp_path, "2026-08-09", "2026-08-12", "DP2",
+        observing_windows=("02:00", "07:00"), run_name="August planning",
+    )
+    assert named["run"].name == "August_planning_2026-08-09_to_2026-08-12__obs_02-00_to_07-00"
+
 
 def test_dp2_profile_is_available():
     release = get_data_release("DP2")
@@ -273,6 +279,11 @@ def test_pipeline_queries_visible_and_previously_observed_targets(tmp_path):
     additional = pd.DataFrame({
         "Target": ["manual-event"], "RA_deg": [266.4], "Dec_deg": [-29.0],
     })
+    mop_cache = tmp_path / "outputs" / "mop_photometry"
+    mop_cache.mkdir(parents=True)
+    pd.DataFrame({"Timestamp": ["2026-08-01T00:00:00Z"]}).to_csv(
+        mop_cache / "visible-event.csv", index=False
+    )
     combined, paths = run_target_selection(
         "2026-08-01", data_release="DP2", root_dir=tmp_path / "outputs",
         mop=_FakeMop(), tap_service=tap, target_plotter=False,
@@ -281,7 +292,7 @@ def test_pipeline_queries_visible_and_previously_observed_targets(tmp_path):
         max_workers=1, verbose=False,
     )
 
-    assert set(combined["Target"]) == {"visible-event", "OGLE-2025-BLG-0001", "manual-event"}
+    assert set(combined["Target"]) == {"visible-event", "OGLE-2025-BLG-0001"}
     assert "invalid-zero-magnitude" not in set(combined["Target"])
     assert "invalid-zero-magnitude" not in set(pd.read_csv(paths["tables"] / "visible_targets_daily.csv")["Target"])
     indexed = combined.set_index("Target")
@@ -291,20 +302,22 @@ def test_pipeline_queries_visible_and_previously_observed_targets(tmp_path):
     assert indexed.loc["OGLE-2025-BLG-0001", "RA_deg"] == 269.54095833333326
     assert indexed.loc["OGLE-2025-BLG-0001", "Dec_deg"] == -19.978
     assert indexed.loc["OGLE-2025-BLG-0001", "coordinate_source"] == "MOP target page"
+    assert indexed.loc["OGLE-2025-BLG-0001", "target_region"] == "BLG"
     assert any("269.54095833333326" in query and "-19.978" in query for query in tap.queries)
     assert not any("269.563841528" in query for query in tap.queries)
     assert (paths["tables"] / "analysis_targets.csv").exists()
     visibility_summary = pd.read_csv(paths["tables"] / "visibility_target_summary.csv")
     assert {"Target", "mag_now", "passes_visibility_filter", "max_observable_minutes"} <= set(visibility_summary)
-    assert set(visibility_summary["Target"]) == {"visible-event", "OGLE-2025-BLG-0001", "manual-event"}
+    assert set(visibility_summary["Target"]) == {"visible-event", "OGLE-2025-BLG-0001"}
     assert visibility_summary.set_index("Target").loc["visible-event", "mag_now"] == 18.0
     queried = pd.read_csv(paths["tables"] / "queried_targets.csv")
-    assert set(queried["Target"]) == {"visible-event", "OGLE-2025-BLG-0001", "manual-event"}
-    assert set(queried["query_source"]) == {"MOP visible", "Previously observed", "User supplied"}
-    assert queried.set_index("Target").loc["manual-event", "is_user_supplied"]
+    assert set(queried["Target"]) == {"visible-event", "OGLE-2025-BLG-0001"}
+    assert set(queried["query_source"]) == {"MOP visible", "Previously observed"}
+    excluded_by_data = pd.read_csv(paths["tables"] / "targets_without_selected_data.csv")
+    assert excluded_by_data["Target"].tolist() == ["manual-event"]
     assert (paths["tables"] / "coverage_targets.csv").exists()
     observing_summary = pd.read_csv(paths["tables"] / "observing_selection_summary.csv")
-    assert {"Target", "mag_now", "visible_hours", "visible_from", "visible_to"} <= set(observing_summary)
+    assert {"Target", "target_region", "mag_now", "visible_hours", "visible_from", "visible_to"} <= set(observing_summary)
     assert (paths["tables"] / "observing_selection_summary.png").exists()
 
 
@@ -369,3 +382,32 @@ def test_visibility_daily_targets_retains_source_provenance():
     assert result.loc["mop", "is_mop_visible_in_run"]
     assert result.loc["hsh", "is_previously_observed"]
     assert result.loc["hsh", "observatory_providers"] == "HSH"
+
+
+class _FakeMopWithoutEventData(_FakeMop):
+    def visible_targets(self, **kwargs):
+        return pd.DataFrame({
+            "Target": ["no-data-event"], "RA_deg": [10.0], "Dec_deg": [-20.0],
+            "mag_now": [18.0], "observation_date": ["2026-08-01"],
+        })
+
+    def visibility_summary(self, *, daily_targets, **kwargs):
+        return daily_targets.assign(mop_parameters_status="unavailable")
+
+
+def test_pipeline_excludes_mop_visible_candidates_without_event_data(tmp_path):
+    tap = _FakeTapService(pd.DataFrame({
+        "visitId": [1], "expMidptMJD": [60000.0], "band": ["i"],
+        "detector": [2], "seeing": [0.8], "magLim": [24.0],
+    }))
+    combined, paths = run_target_selection(
+        "2026-08-01", data_release="DP2", root_dir=tmp_path / "outputs",
+        mop=_FakeMopWithoutEventData(), tap_service=tap, target_plotter=False,
+        generate_visibility_plots=False, max_workers=1, verbose=False,
+    )
+
+    assert combined.empty
+    excluded = pd.read_csv(paths["tables"] / "mop_candidates_without_data.csv")
+    assert excluded["Target"].tolist() == ["no-data-event"]
+    assert excluded.iloc[0]["excluded_missing_mop_data"]
+    assert pd.read_csv(paths["tables"] / "visible_summary.csv").empty

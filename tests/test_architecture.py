@@ -1,7 +1,7 @@
 import pandas as pd
 
 from target_registry import TargetRegistry
-from target_selection.config import AnalysisConfig, ProductSettings, SourceSpec
+from target_selection.config import AnalysisConfig, ProductSettings, SelectionSettings, SourceSpec
 from target_selection.sources import AdapterRegistry, default_adapter_registry
 from target_selection.workflow import AnalysisWorkflow, _merge_targets
 
@@ -9,7 +9,7 @@ from target_selection.workflow import AnalysisWorkflow, _merge_targets
 def test_normalized_config_selects_sources_by_name():
     config = AnalysisConfig.from_mapping(
         {
-            "run": {"start_date": "2026-08-01"},
+            "run": {"name": "example", "start_date": "2026-08-01"},
             "sources": {
                 "target_providers": ["mop"],
                 "followup_surveys": [],
@@ -23,6 +23,7 @@ def test_normalized_config_selects_sources_by_name():
         }
     )
     assert config.target_providers == ("mop",)
+    assert config.name == "example"
     assert config.followup_surveys == ()
     assert config.reference_surveys == ("dp1", "dp2")
     assert config.reference_specs["dp2"].options["data_release"] == "DP2"
@@ -173,17 +174,23 @@ def test_workflow_can_run_without_a_reference_survey(tmp_path):
         followup_surveys=(),
         reference_surveys=(),
         provider_specs={"manual": SourceSpec("manual", "static")},
+        selection=SelectionSettings(
+            target_data_scope="all", minimum_altitude_deg=0,
+            minimum_observable_minutes=1, time_step_minutes=60,
+        ),
         reference_specs={},
         products=ProductSettings(
             visibility_plots=False,
-            sky_maps=False,
+            sky_maps=True,
             monitoring_report=False,
+            observing_selection_summary=False,
         ),
     )
     result = AnalysisWorkflow(config, adapters=adapters).run()
     assert set(result.runs) == {"planning_only"}
     assert list(result.targets["Target"]) == ["OGLE-TEST"]
     assert (result.runs["planning_only"].paths["tables"] / "visibility.csv").exists()
+    assert (result.runs["planning_only"].paths["sky_plots"] / "sky_by_mag_and_hsh_points.png").exists()
     assert (result.runs["planning_only"].paths["run"] / "product_index.json").exists()
 
 

@@ -99,7 +99,7 @@ Start with these files inside the printed run directory:
 2. `analysis_config.json` — exact normalized configuration used.
 3. `tables/combined_targets.csv` — complete enriched target result.
 4. `tables/observing_selection_summary.png` — compact planning table.
-5. `monitoring_reports/monitoring_lightcurves.pdf` — light curves and temporal
+5. `monitoring_reports/lightcurves.pdf` — light curves and temporal
    coverage, when enabled.
 
 The first run downloads or imports source data. Compatible later runs reuse the

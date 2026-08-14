@@ -3,6 +3,7 @@
 
 # Frequently changed run inputs. Omit end_date for a single night.
 [run]
+name = ""
 start_date = "2026-08-01"
 end_date = "2026-08-15"
 observatory = "El Leoncito"
@@ -12,21 +13,28 @@ output_dir = "outputs"
 [sources]
 target_providers = ["mop"]
 followup_surveys = ["casleo_hsh"]
-reference_surveys = ["rubin_dp2"]
+reference_surveys = [] # ["rubin_dp2"]
 
 [selection]
+# "with_data" (default): analyze only targets with MOP photometry, active-survey images, or active-source photometry.
+# "all": disable this extra active-source cut; MOP candidates without any event data remain diagnostic-only.
+target_data_scope = "with_data"
 # Missing MOP magnitudes are retained; omit this keyword for no faint limit.
 maximum_current_magnitude = 18.5
 minimum_altitude_deg = 40.0
 minimum_observable_minutes = 90.0
 time_step_minutes = 1
-# "all_queried" or "mop_daily"
+# Candidate pool for the nightly visibility calculation. The local visibility
+# cuts above are then always applied before creating the plots.
+# "all_queried": all configured provider, follow-up, and user targets.
+# "mop_daily": only targets returned by MOP for that specific night.
 visibility_target_scope = "all_queried"
 # Local time pair applied to every night; the interval may cross midnight.
 observing_windows = ["20:30", "07:00"]
 
 [products]
 visibility_plots = true
+observing_selection_summary = true
 sky_maps = true
 monitoring_report = true
 # Target reports and reference photometry are the expensive optional stages.
@@ -86,7 +94,7 @@ refresh_followup_surveys = false
 [runtime]
 max_workers = 4
 verbose = true
-overwrite_visibility_plots = false
+overwrite_visibility_plots = true
 overwrite_target_reports = false
 overwrite_reference_photometry = false
 monitoring_plots_per_page = 3

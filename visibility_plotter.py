@@ -20,7 +20,7 @@ from astropy.time import Time
 from astropy.utils import iers
 
 
-VISIBILITY_PLOT_VERSION = 24
+VISIBILITY_PLOT_VERSION = 27
 
 
 OBSERVATORIES = {
@@ -96,6 +96,14 @@ def _visibility_target_label(row: pd.Series, observable_minutes: float | None = 
     magnitude_text = f"mag={float(magnitude):.1f}" if pd.notna(magnitude) else "mag=—"
     return f"{name} ({hours_text}, {magnitude_text})"
 
+
+
+def _visibility_magnitude_label(row: pd.Series) -> str:
+    """Format a compact current-magnitude label for a target row."""
+    magnitude = pd.to_numeric(row.get("mag_now", np.nan), errors="coerce")
+    if pd.isna(magnitude) or float(magnitude) <= 0:
+        return "—"
+    return f"{float(magnitude):.1f}"
 
 def _source_flag(value) -> bool:
     """Interpret nullable boolean fields consistently across CSV round-trips."""
@@ -433,6 +441,8 @@ def plot_nightly_visibility(
         altitude_rows.append(np.asarray(altitude, dtype=float))
         altitude_names.append(str(row.get("Target", "Target")))
 
+    colorbar = None
+
     # Lower panel: one horizontal time bar per target, colored by altitude.
     # Values below 30 degrees are shown as a pale background; the color scale
     # itself is fixed to 30--90 degrees for comparisons between nights.
@@ -459,7 +469,26 @@ def plot_nightly_visibility(
         altitude_bar_axis.set_yticklabels(
             altitude_names, fontsize=8 if target_count <= 45 else 7
         )
+        altitude_bar_axis.hlines(
+            np.arange(-.5, len(altitude_names) + .5, 1),
+            x_edges[0], x_edges[-1], colors="black", linewidth=.22, zorder=4,
+        )
         altitude_bar_axis.set_ylabel("Targets", fontsize=8)
+        # Print the current magnitude alongside each altitude bar on the right.
+        # It is a row annotation rather than a second scientific scale.
+        magnitude_axis = altitude_bar_axis.twinx()
+        magnitude_axis.patch.set_visible(False)
+        magnitude_axis.spines["left"].set_visible(False)
+        magnitude_axis.spines["right"].set_visible(False)
+        magnitude_axis.yaxis.set_label_position("right")
+        magnitude_axis.yaxis.tick_right()
+        magnitude_axis.set_ylim(altitude_bar_axis.get_ylim())
+        magnitude_axis.set_yticks(np.arange(len(altitude_names)))
+        magnitude_axis.set_yticklabels(
+            [_visibility_magnitude_label(row) for _, row in unique.iterrows()],
+            fontsize=8 if target_count <= 45 else 7,
+        )
+        magnitude_axis.tick_params(axis="y", length=0, pad=4)
         altitude_bar_axis.set_xlabel(f"Local time\n[{timezone.key}]")
         altitude_bar_axis.grid(False)
         colorbar = fig.colorbar(
@@ -567,7 +596,17 @@ def plot_nightly_visibility(
         fontsize=7, frameon=False, borderaxespad=0.,
     )
     fig.suptitle(title, y=.98, fontsize=10)
-    fig.subplots_adjust(hspace=.12, bottom=.18, top=.83, left=.08, right=.94)
+    fig.subplots_adjust(hspace=.12, bottom=.18, top=.83, left=.08, right=.91)
+    # ``subplots_adjust`` can otherwise move the colorbar over the altitude
+    # matrix. Reposition it explicitly below the lower panel.
+    if colorbar is not None:
+        bar_panel = altitude_bar_axis.get_position()
+        colorbar.ax.set_position([
+            bar_panel.x0 + .15 * bar_panel.width,
+            max(.035, bar_panel.y0 - .068),
+            .70 * bar_panel.width,
+            .014,
+        ])
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=170, bbox_inches="tight", pad_inches=.08)
     plt.close(fig)
@@ -634,6 +673,91 @@ def save_selected_visibility_plots(
             )
     return paths
 
+
+
+
+def compile_visibility_plot_pages(
+    visibility_plots: str | Path | list[str | Path],
+    output_path: str | Path,
+) -> Path:
+    """Compile already-generated nightly visibility PNGs into a dated PDF.
+
+    One PDF page is written per observing date. Every source-aware part for
+    that date remains a separate panel, preserving the exact target labels,
+    styles, and criteria of the PNG produced by ``save_nightly_visibility_plots``.
+    """
+    if isinstance(visibility_plots, (str, Path)):
+        candidate = Path(visibility_plots)
+        image_paths = (
+            sorted(candidate.glob("*_visibility.png"))
+            if candidate.is_dir() else [candidate]
+        )
+    else:
+        image_paths = sorted(Path(path) for path in visibility_plots)
+    image_paths = [
+        path for path in image_paths
+        if path.exists() and path.suffix.lower() == ".png" and len(path.name) >= 10
+    ]
+    dated_paths: dict[str, list[Path]] = {}
+    for path in image_paths:
+        date_text = path.name[:10]
+        try:
+            pd.Timestamp(date_text)
+        except (TypeError, ValueError):
+            continue
+        dated_paths.setdefault(date_text, []).append(path)
+    if not dated_paths:
+        raise ValueError("No generated nightly visibility PNGs were found.")
+
+    destination = Path(output_path).with_suffix(".pdf")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    with PdfPages(destination) as pdf:
+        for date_text, paths in sorted(dated_paths.items()):
+            panels = []
+            for path in sorted(paths):
+                image = plt.imread(path)
+                height = 11.0 * image.shape[0] / image.shape[1]
+                panels.append((path, image, height))
+            page_height = max(5.0, 1.30 + sum(height for _, _, height in panels) + .32 * len(panels))
+            fig = plt.figure(figsize=(12.0, page_height))
+            fig.suptitle(
+                "Nightly target-visibility plots", x=.04, y=.988,
+                ha="left", fontsize=14, weight="bold",
+            )
+            fig.text(
+                .04, .965,
+                "Panels are the generated visibility plots; titles identify the target group and part.",
+                ha="left", va="top", fontsize=8,
+            )
+            fig.text(
+                .965, .983, f"Observing date\n{date_text}",
+                ha="right", va="top", fontsize=10, weight="bold",
+                bbox={"boxstyle": "round,pad=.35", "facecolor": "#edf4fb", "edgecolor": "#4d6d8a"},
+            )
+            cursor = page_height - 1.10
+            for panel_index, (path, image, height) in enumerate(panels, start=1):
+                stem = path.stem
+                if "_part_" in stem:
+                    suffix = stem.split("_part_", 1)[1].removesuffix("_visibility")
+                    part_number, source = suffix.split("_", 1)
+                    source = source.replace("mop-only", "MOP-only").replace(
+                        "hsh-js-observed", "HSH/JS-observed"
+                    ).replace("-", " ")
+                    caption = f"{source} — part {int(part_number)}/{len(panels)}"
+                else:
+                    caption = "All selected targets"
+                cursor -= .20
+                fig.text(.04, cursor / page_height, caption, ha="left", va="top", fontsize=9, weight="bold")
+                cursor -= height
+                axis = fig.add_axes([.04, cursor / page_height, .92, height / page_height])
+                axis.imshow(image)
+                axis.axis("off")
+                cursor -= .12
+            pdf.savefig(fig, bbox_inches="tight", pad_inches=.05)
+            plt.close(fig)
+    return destination
 
 
 def plot_visibility_sequence(

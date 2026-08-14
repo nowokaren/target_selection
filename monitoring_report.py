@@ -47,7 +47,37 @@ def _mjd_to_dates(values: pd.Series | np.ndarray) -> np.ndarray:
     return mdates.date2num(timestamps.to_numpy(dtype="datetime64[us]"))
 
 
+def _monitoring_future_xmax(created_at: object | None = None) -> float:
+    """Return the common light-curve horizon: two calendar months after creation."""
+    timestamp = pd.Timestamp.now(tz="UTC") if created_at is None else pd.Timestamp(created_at)
+    if timestamp.tzinfo is not None:
+        timestamp = timestamp.tz_convert(None)
+    return float(mdates.date2num((timestamp + pd.DateOffset(months=2)).to_pydatetime()))
 
+
+
+
+def _sort_targets_by_mag_now(targets: pd.DataFrame) -> pd.DataFrame:
+    """Sort targets from bright to faint using valid current MOP magnitudes.
+
+    Missing, non-numerical, and zero magnitudes are placed last because MOP
+    uses zero to represent an unavailable current magnitude.
+    """
+    records = targets.drop_duplicates("Target").copy()
+    if "mag_now" in records:
+        magnitude = pd.to_numeric(records["mag_now"], errors="coerce")
+    else:
+        magnitude = pd.Series(np.nan, index=records.index, dtype=float)
+    records["_mag_now_sort"] = magnitude.where(magnitude.gt(0))
+    return (
+        records.sort_values(
+            ["_mag_now_sort", "Target"],
+            na_position="last",
+            kind="stable",
+        )
+        .drop(columns="_mag_now_sort")
+        .reset_index(drop=True)
+    )
 def _nominal_parameter(value: object) -> float:
     """Extract a numerical parameter value from MOP value±uncertainty text."""
     match = re.search(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", str(value))
@@ -153,6 +183,8 @@ def plot_monitoring_lightcurve(
     layers: Iterable[str] | None = None,
     title: str | None = None,
     show_legend: bool = True,
+    future_xmax: float | None = None,
+    enforce_future_horizon: bool = True,
     ax=None,
 ) -> plt.Axes:
     """Plot selected MOP, Rubin, HSH, and JS monitoring layers for one target."""
@@ -251,6 +283,8 @@ def plot_monitoring_lightcurve(
     ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
     ax.set_xlabel("Date")
     ax.grid(alpha=.22, zorder=1)
+    if enforce_future_horizon:
+        ax.set_xlim(right=_monitoring_future_xmax() if future_xmax is None else future_xmax)
     return ax
 
 
@@ -267,6 +301,7 @@ def create_monitoring_report(
     layers: Iterable[str] | None = None,
     plots_per_page: int = 3,
     photometry_loader: Callable[[pd.Series], pd.DataFrame] | None = None,
+    created_at: object | None = None,
 ) -> dict[str, int | Path]:
     """Create a multipage PDF with selected MOP, Rubin, HSH, and JS layers.
 
@@ -279,7 +314,8 @@ def create_monitoring_report(
         raise ValueError("plots_per_page must be at least one.")
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    records = targets.drop_duplicates("Target").reset_index(drop=True)
+    records = _sort_targets_by_mag_now(targets)
+    future_xmax = _monitoring_future_xmax(created_at)
     coverage_groups = (
         {name: group for name, group in lsst_coverage.groupby("Target", sort=False)}
         if lsst_coverage is not None and not lsst_coverage.empty and "Target" in lsst_coverage else {}
@@ -315,14 +351,14 @@ def create_monitoring_report(
                     "data_release": data_release,
                     "layers": selected_layers,
                 }
-                plot_monitoring_lightcurve(target, target_photometry, ax=main_axis, **plot_kwargs)
+                plot_monitoring_lightcurve(target, target_photometry, ax=main_axis, future_xmax=future_xmax, **plot_kwargs)
                 limits = _microlensing_zoom_limits(target)
                 if limits is None:
                     zoom_axis.set_axis_off()
                     continue
                 plot_monitoring_lightcurve(
                     target, target_photometry, ax=zoom_axis, show_legend=False,
-                    title="MOP zoom: $t_0 \\pm 2t_E$", **plot_kwargs,
+                    title="MOP zoom: $t_0 \\pm 2t_E$", enforce_future_horizon=False, **plot_kwargs,
                 )
                 zoom_axis.set_xlim(*limits)
             for row_index in range(len(page), plots_per_page):

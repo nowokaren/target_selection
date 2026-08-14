@@ -73,7 +73,8 @@ The first run may take time because it refreshes the configured providers and su
 - `GENERATE_TARGET_REPORTS=False`: skip individual target dashboard PNGs when only aggregate MOP/HSH products are needed; set `True` to enable them.
 - `target_plotter=False`: skip individual reports.
 - `target_report_scope="all_queried"`: generate reports for every Rubin-query target; set `"visibility_selected"` to generate them only for targets that pass the local visibility filter on at least one requested night.
-- `visibility_target_scope="all_queried"`: evaluate every queried target on every requested night for `visibility_target_summary.csv` and nightly plots; set `"mop_daily"` to evaluate only MOP candidates returned for each night.
+- `target_data_scope="with_data"`: default analysis mode; keep only targets with MOP photometry, active-survey images, or active-source photometry. Set `"all"` to disable this extra active-source cut; MOP candidates with no event parameters and no photometry remain diagnostic-only.
+- `visibility_target_scope="all_queried"`: choose the candidate pool for nightly visibility: every queried target on every requested night; set `"mop_daily"` to use only MOP candidates returned for each night. Both scopes are subsequently filtered by the local visibility cuts, so a separate `"visibility_only"` scope would be redundant.
 - `previously_observed_providers=("HSH", "JS")`: choose which registered local surveys contribute previously observed targets; use a subset such as `("HSH",)`.
 - `additional_targets=...`: add a pandas DataFrame or CSV path with `Target`, `RA_deg`, and `Dec_deg`; these targets join the Rubin query and, by default, nightly visibility evaluation.
 - `sky_marker_encoding="split_color"`: encode magnitude and visits with two colored marker halves and two color bars.
@@ -157,7 +158,7 @@ When more than 20 targets pass on one night, the automatic and manually selected
 ```python
 from visibility_plotter import (
     plot_selected_visibility,
-    plot_visibility_sequence,
+    compile_visibility_plot_pages,
     save_selected_visibility_plots,
 )
 
@@ -170,17 +171,14 @@ save_selected_visibility_plots(
     observing_windows=allocated_time,
 )
 
-# Stack all selected nights chronologically; the extension chooses PDF or PNG.
-plot_visibility_sequence(
-    selected_for_all_nights,
+# Compile the already-generated nightly PNGs, preserving source-aware parts.
+compile_visibility_plot_pages(
+    "final_visibility_plots",
     "visibility_sequence.pdf",
-    minimum_observable_minutes=90,
-    x_reference_every=4,
-    observing_windows=allocated_time,
 )
 ```
 
-For explicit selection outside the pipeline, use `select_nightly_targets(...)`. Set `return_all=True` to retain rejected targets and their reasons. `plot_visibility_sequence(...)` starts at the first evening civil twilight (and extends through dawn or a later assigned interval), orders panels chronologically, repeats time labels every `x_reference_every` nights, and writes PDF by default when no extension is supplied. The twilight shading therefore includes both evening and dawn transitions.
+For explicit selection outside the pipeline, use `select_nightly_targets(...)`. Set `return_all=True` to retain rejected targets and their reasons. `compile_visibility_plot_pages(...)` creates one PDF page per observing date from the existing nightly PNGs. It preserves every source-aware part and adds a date box to each page.
 
 ## Outputs
 
@@ -197,6 +195,7 @@ outputs/
     ├── tables/
     │   ├── visible_targets_daily.csv   # Visibility by date
     │   ├── visible_summary.csv         # Visibility + MOP parameters
+    │   ├── mop_candidates_without_data.csv # MOP-visible candidates excluded for missing event data
     │   ├── visibility_target_summary.csv # Per-target local visibility pass/fail summary
     │   ├── queried_targets.csv          # Complete source-labeled Rubin query list
     │   ├── coverage_raw.csv            # Rubin visit/detector rows
@@ -212,7 +211,7 @@ outputs/
     │   └── target_summary.png          # Visual summary table
     ├── sky_plots/                      # Full-sky and bulge maps
     ├── monitoring_reports/
-    │   └── monitoring_lightcurves.pdf  # Optional MOP curves with DP2/HSH/JS epochs and t0 ± 2tE zooms
+    │   └── lightcurves.pdf  # Optional MOP curves with DP2/HSH/JS epochs and t0 ± 2tE zooms
     ├── visibility_plots/               # Automatically filtered nightly plots
     │   └── visibility_selection.csv    # Metrics, decisions, and rejection reasons
     └── targets/

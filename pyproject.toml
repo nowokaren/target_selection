@@ -26,7 +26,7 @@ test = ["pytest>=8"]
 docs = ["mkdocs>=1.6,<2"]
 
 [tool.setuptools]
-py-modules = ["target_selection_pipeline", "data_release_config", "mop_photometry", "release_photometry", "target_report", "visibility_plotter", "observatory_observations", "target_registry", "monitoring_report"]
+py-modules = ["target_selection_pipeline", "data_release_config", "mop_photometry", "release_photometry", "target_report", "visibility_plotter", "observatory_observations", "target_registry", "monitoring_report", "target_region"]
 packages = ["target_selection", "target_selection.sources"]
 
 [tool.pytest.ini_options]
