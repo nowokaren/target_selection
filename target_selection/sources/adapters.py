@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import pandas as pd
 
 from data_release_config import get_data_release
 from target_selection.config import SourceSpec
 from target_selection.sources.base import SourceContext
+from target_selection.sources.normalization import (
+    OBSERVATION_ALIASES,
+    PHOTOMETRY_ALIASES,
+    TARGET_ALIASES,
+    normalize_columns,
+)
 
 
 def _required_path(spec: SourceSpec, key: str = "path") -> Path:
@@ -22,22 +28,20 @@ def _required_path(spec: SourceSpec, key: str = "path") -> Path:
     return path
 
 
-def _normalize_targets(data: pd.DataFrame, source_name: str) -> pd.DataFrame:
-    aliases = {
-        "target": "Target",
-        "name": "Target",
-        "object": "Target",
-        "ra": "RA_deg",
-        "ra_deg": "RA_deg",
-        "dec": "Dec_deg",
-        "dec_deg": "Dec_deg",
-    }
-    rename = {
-        column: aliases[column.strip().lower()]
-        for column in data.columns
-        if column.strip().lower() in aliases
-    }
-    normalized = data.rename(columns=rename).copy()
+def _normalize_targets(
+    data: pd.DataFrame,
+    source_name: str,
+    *,
+    column_map: Mapping[str, str] | None = None,
+) -> pd.DataFrame:
+    """Normalize a target table and attach its coordinate provenance."""
+    normalized = normalize_columns(
+        data,
+        aliases=TARGET_ALIASES,
+        column_map=column_map,
+        source_name=source_name,
+        data_kind="Target",
+    )
     required = {"Target", "RA_deg", "Dec_deg"}
     missing = required - set(normalized.columns)
     if missing:
@@ -66,7 +70,7 @@ def _import_photometry_if_configured(
     provider_name: str,
     context: SourceContext,
 ) -> int:
-    """Import an optional normalized follow-up photometry CSV."""
+    """Import an optional follow-up photometry CSV using its declared map."""
     value = spec.options.get("photometry_path")
     if not value:
         return 0
@@ -84,25 +88,12 @@ def _import_photometry_if_configured(
         and context.database.source_is_current(provider_name, source_id, fingerprint)
     ):
         return 0
-    data = pd.read_csv(path)
-    aliases = {
-        "target": "Target",
-        "name": "Target",
-        "object": "Target",
-        "filter": "band",
-        "magnitude": "magnitude",
-        "mag": "magnitude",
-        "error": "magnitude_error",
-        "mag_error": "magnitude_error",
-        "timestamp": "Timestamp",
-        "date": "Timestamp",
-    }
-    data = data.rename(
-        columns={
-            column: aliases[column.strip().lower()]
-            for column in data.columns
-            if column.strip().lower() in aliases
-        }
+    data = normalize_columns(
+        pd.read_csv(path),
+        aliases=PHOTOMETRY_ALIASES,
+        column_map=spec.options.get("photometry_column_map"),
+        source_name=spec.name,
+        data_kind="Photometry",
     )
     if "mjd" not in data and "Timestamp" in data:
         timestamps = pd.to_datetime(data["Timestamp"], errors="coerce", utc=True)
@@ -176,12 +167,14 @@ class CsvTargetProvider:
 
     def collect_targets(self, context: SourceContext) -> pd.DataFrame:
         return _normalize_targets(
-            pd.read_csv(_required_path(self.spec)), self.spec.name
+            pd.read_csv(_required_path(self.spec)),
+            self.spec.name,
+            column_map=self.spec.options.get("column_map"),
         )
 
 
 class HshFollowupSurvey:
-    """CASLEO/HSH survey adapter for the astrometric image inventory."""
+    """CASLEO/HSH survey adapter for the native astrometric image inventory."""
 
     def __init__(self, spec: SourceSpec):
         self.spec = spec
@@ -208,7 +201,7 @@ class HshFollowupSurvey:
 
 
 class CsvFollowupSurvey:
-    """Normalized follow-up observation inventory for JS or future surveys."""
+    """CSV follow-up observation inventory for JS or future surveys."""
 
     def __init__(self, spec: SourceSpec):
         self.spec = spec
@@ -233,7 +226,13 @@ class CsvFollowupSurvey:
         if current:
             observations = 0
         else:
-            data = pd.read_csv(path)
+            data = normalize_columns(
+                pd.read_csv(path),
+                aliases=OBSERVATION_ALIASES,
+                column_map=self.spec.options.get("inventory_column_map"),
+                source_name=self.spec.name,
+                data_kind="Observation",
+            )
             observations = context.database.import_survey_observations(
                 self.provider_name,
                 data,

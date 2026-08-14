@@ -491,8 +491,10 @@ def query_dia_forced_photometry(
                 pd.to_numeric(objects["dec"], errors="coerce").to_numpy() * u.deg,
             )
             separation = target_coord.separation(object_coord).arcsec
-            selected = objects.iloc[int(np.nanargmin(separation))]
-            dia_object_id = int(selected["diaObjectId"])
+            # Do not extract an identifier from a mixed-type row. Pandas coerces
+            # a row containing RA/Dec to float and silently rounds large IDs.
+            selected_index = objects.index[int(np.nanargmin(separation))]
+            dia_object_id = int(objects.at[selected_index, "diaObjectId"])
             forced = _tap_to_frame(tap_service, f"""
                 SELECT fs.diaObjectId AS diaObjectId, fs.visit AS visitId, fs.detector AS detector,
                        fs.band AS band, fs.psfFlux AS direct_flux_njy,

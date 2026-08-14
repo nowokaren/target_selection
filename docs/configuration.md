@@ -181,7 +181,13 @@ path = "inputs/targets.csv"
 ```
 
 The file requires `Target`, `RA_deg`, and `Dec_deg`. Common lowercase aliases
-such as `target`, `name`, `ra`, and `dec` are normalized.
+such as `target`, `name`, `ra`, and `dec` are normalized automatically. For
+other headers, use `column_map`, whose keys are input headers and values are
+canonical names:
+
+```toml
+column_map = { event_id = "Target", ra_icrs = "RA_deg", dec_icrs = "Dec_deg" }
+```
 
 ## Built-in follow-up adapters
 
@@ -210,8 +216,11 @@ photometry_path = "js_data/photometry.csv"
 ```
 
 Observation rows require `Target` and `mjd`; optional columns include `band`,
-`exptime_s`, `usable`, `RA_deg`, and `Dec_deg`. Photometry requires an epoch and
-either magnitude or flux data.
+`exptime_s`, `usable`, `RA_deg`, and `Dec_deg`. Photometry requires an epoch
+and either magnitude or flux data. Use `inventory_column_map` and
+`photometry_column_map` for nonstandard CSV headers. See
+[Adding a source](adding_sources.md#normalized-columns-and-configurable-maps)
+for the complete canonical schemas and examples.
 
 ## Built-in reference adapter
 
