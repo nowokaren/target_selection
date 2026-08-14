@@ -3,6 +3,7 @@
 from pathlib import Path
 import re
 
+import numpy as np
 import pandas as pd
 
 
@@ -39,7 +40,85 @@ def load_event_photometry(target, *, mop, cache_dir, refresh=False, legacy_cache
                 name_error = position_error
         result = pd.DataFrame()
         result.attrs["error"] = str(name_error)
+
         return result
+
+
+def _as_bool(value: object) -> bool:
+    """Interpret nullable boolean values after CSV round-trips."""
+    if value is None or pd.isna(value):
+        return False
+    if isinstance(value, str):
+        return value.strip().casefold() in {"1", "true", "yes", "y"}
+    return bool(value)
+
+
+def annotate_mop_event_data(targets, *, photometry_dir):
+    """Annotate MOP-visible targets with cached parameter/photometry availability."""
+    data = targets.copy()
+    if data.empty:
+        data["has_mop_parameters"] = pd.Series(dtype=bool)
+        data["mop_photometry_points"] = pd.Series(dtype=int)
+        data["has_mop_event_data"] = pd.Series(dtype=bool)
+        data["excluded_missing_mop_data"] = pd.Series(dtype=bool)
+        data["mop_data_exclusion_reason"] = pd.Series(dtype=str)
+        return data
+
+    status = data.get("mop_parameters_status", pd.Series("", index=data.index))
+    parameter_metadata = {
+        "mop_link", "mop_parameters_status", "mop_parameters_error",
+        "mop_ra", "mop_dec", "mop_ra_deg", "mop_dec_deg",
+        "mop_coordinate_source",
+    }
+    parameter_columns = [
+        column for column in data.columns
+        if column.startswith("mop_") and column not in parameter_metadata
+    ]
+    if parameter_columns:
+        parameter_values = data[parameter_columns]
+        has_parameter_value = (
+            parameter_values.notna()
+            & parameter_values.astype(str).apply(
+                lambda column: column.str.strip().ne("")
+            )
+        ).any(axis=1)
+    else:
+        has_parameter_value = pd.Series(False, index=data.index)
+    data["has_mop_parameters"] = (
+        status.astype(str).str.strip().str.casefold().eq("available")
+        & has_parameter_value
+    )
+    cache_dir = Path(photometry_dir)
+
+    def point_count(target_name: object) -> int:
+        path = cache_dir / f"{_safe_target_name(target_name)}.csv"
+        if not path.exists():
+            return 0
+        try:
+            return len(pd.read_csv(path, usecols=["Timestamp"]))
+        except (OSError, ValueError):
+            return 0
+
+    data["mop_photometry_points"] = data["Target"].map(point_count).astype(int)
+    data["has_mop_event_data"] = (
+        data["has_mop_parameters"] | data["mop_photometry_points"].gt(0)
+    )
+    visible = data.get("is_mop_visible_in_run", pd.Series(False, index=data.index))
+    data["excluded_missing_mop_data"] = visible.map(_as_bool) & ~data["has_mop_event_data"]
+    data["mop_data_exclusion_reason"] = np.where(
+        data["excluded_missing_mop_data"],
+        "MOP candidate has neither event parameters nor photometry",
+        "",
+    )
+    return data
+
+
+def split_mop_candidates_without_event_data(targets, *, photometry_dir):
+    """Return analysis targets and excluded MOP-visible candidates with no data."""
+    annotated = annotate_mop_event_data(targets, photometry_dir=photometry_dir)
+    excluded = annotated.loc[annotated["excluded_missing_mop_data"]].copy()
+    included = annotated.loc[~annotated["excluded_missing_mop_data"]].copy()
+    return included.reset_index(drop=True), excluded.reset_index(drop=True)
 
 
 def select_lightcurve_filters(photometry):

@@ -20,7 +20,7 @@ from astropy.time import Time
 from astropy.utils import iers
 
 
-VISIBILITY_PLOT_VERSION = 21
+VISIBILITY_PLOT_VERSION = 27
 
 
 OBSERVATORIES = {
@@ -95,6 +95,82 @@ def _visibility_target_label(row: pd.Series, observable_minutes: float | None = 
     hours_text = f"{float(minutes) / 60:.1f} h" if pd.notna(minutes) else "hours unavailable"
     magnitude_text = f"mag={float(magnitude):.1f}" if pd.notna(magnitude) else "mag=—"
     return f"{name} ({hours_text}, {magnitude_text})"
+
+
+
+def _visibility_magnitude_label(row: pd.Series) -> str:
+    """Format a compact current-magnitude label for a target row."""
+    magnitude = pd.to_numeric(row.get("mag_now", np.nan), errors="coerce")
+    if pd.isna(magnitude) or float(magnitude) <= 0:
+        return "—"
+    return f"{float(magnitude):.1f}"
+
+def _source_flag(value) -> bool:
+    """Interpret nullable boolean fields consistently across CSV round-trips."""
+    if value is None or pd.isna(value):
+        return False
+    if isinstance(value, str):
+        return value.strip().casefold() in {"1", "true", "yes", "y"}
+    return bool(value)
+
+
+def _visibility_source_group(row: pd.Series) -> str:
+    """Classify one row for source-aware visibility plot grouping."""
+    source_text = " ".join(
+        str(row.get(column, ""))
+        for column in ("target_source", "input_sources", "query_source", "observatory_providers")
+    ).casefold()
+    followup = _source_flag(row.get("is_previously_observed")) or any(
+        token in source_text for token in ("hsh", "casleo_hsh", "js", "casleo_js")
+    )
+    mop = _source_flag(row.get("is_mop_visible_in_run")) or "mop" in source_text
+    if followup:
+        return "HSH/JS-observed"
+    if mop:
+        return "MOP-only"
+    return "Other targets"
+
+
+def _visibility_line_style(row: pd.Series, *, show_source_styles: bool) -> str:
+    """Return a semantic line style only when source groups share one plot."""
+    if not show_source_styles:
+        return "-"
+    return {
+        "MOP-only": "-",
+        "HSH/JS-observed": "--",
+        "Other targets": "-.",
+    }[_visibility_source_group(row)]
+
+
+def _split_visibility_targets(
+    targets: pd.DataFrame, *, max_targets_per_plot: int = 20,
+) -> list[tuple[str, pd.DataFrame]]:
+    """Split a nightly target list into source-aware chunks of bounded size."""
+    if max_targets_per_plot < 1:
+        raise ValueError("max_targets_per_plot must be positive.")
+    unique = targets.drop_duplicates("Target").copy()
+    if len(unique) <= max_targets_per_plot:
+        return [("all", unique)]
+
+    unique["_visibility_source_group"] = unique.apply(_visibility_source_group, axis=1)
+    groups = ("MOP-only", "HSH/JS-observed", "Other targets")
+    chunks: list[tuple[str, pd.DataFrame]] = []
+    for group in groups:
+        rows = unique.loc[unique["_visibility_source_group"].eq(group)].drop(
+            columns="_visibility_source_group"
+        )
+        for start in range(0, len(rows), max_targets_per_plot):
+            chunks.append((group, rows.iloc[start:start + max_targets_per_plot].copy()))
+    return chunks
+
+
+def _visibility_part_slug(source_group: str) -> str:
+    """Return a stable filename component for a source-group visibility part."""
+    return {
+        "MOP-only": "mop_only",
+        "HSH/JS-observed": "hsh_js_observed",
+        "Other targets": "other",
+    }.get(source_group, "targets")
 
 
 def _window_pairs(value) -> list[tuple[str, str]]:
@@ -271,6 +347,7 @@ def plot_nightly_visibility(
     minimum_altitude: float = 40.0,
     time_step_minutes: int = 1,
     observing_windows=None,
+    part_label: str | None = None,
 ) -> None:
     """Plot altitude, airmass, twilight, and Moon altitude for one night."""
     if time_step_minutes < 1:
@@ -314,10 +391,15 @@ def plot_nightly_visibility(
     unique["RA_deg"] = pd.to_numeric(unique.get("RA_deg"), errors="coerce")
     unique["Dec_deg"] = pd.to_numeric(unique.get("Dec_deg"), errors="coerce")
     unique = unique.dropna(subset=["RA_deg", "Dec_deg"])
-    figure_height = max(8.5, 7.4 + .045 * len(unique))
+    # Give the altitude-bar panel enough physical height for one readable row
+    # per target. The previous capped GridSpec ratio compressed labels when a
+    # night contained many targets.
+    target_count = len(unique)
+    bar_panel_height = max(1.8, 0.24 * max(target_count, 1))
+    figure_height = max(8.5, 6.8 + bar_panel_height)
     fig, axes = plt.subplots(
         2, 1, figsize=(11.5, figure_height), sharex=True,
-        gridspec_kw={"height_ratios": (3.2, max(1.2, min(2.8, .12 * max(len(unique), 1))))},
+        gridspec_kw={"height_ratios": (5.0, bar_panel_height)},
     )
     ax, altitude_bar_axis = axes
 
@@ -340,21 +422,26 @@ def plot_nightly_visibility(
         for name in ("tab20", "tab20b", "tab20c")
     ])
     palette = palette[np.r_[np.arange(0, 60, 2), np.arange(1, 60, 2)]]
-    line_styles = ("-", "--", "-.")
+    source_groups = {_visibility_source_group(row) for _, row in unique.iterrows()}
+    show_source_styles = len(source_groups) > 1
     altitude_rows = []
     altitude_names = []
     for target_index, (_, row) in enumerate(unique.iterrows()):
         color = palette[target_index % len(palette)]
-        line_style = line_styles[(target_index // len(palette)) % len(line_styles)]
         coord = SkyCoord(float(row["RA_deg"]) * u.deg, float(row["Dec_deg"]) * u.deg)
         altitude = coord.transform_to(frame).alt.degree
         observable_minutes = pd.to_numeric(row.get("observable_minutes"), errors="coerce")
         if pd.isna(observable_minutes):
             observable_minutes = float(((altitude >= minimum_altitude) & eligible_time).sum() * time_step_minutes)
-        ax.plot(local_times, altitude, lw=1.35, ls=line_style, color=color,
+        ax.plot(
+            local_times, altitude, lw=1.35,
+            ls=_visibility_line_style(row, show_source_styles=show_source_styles),
+            color=color,
                 label=_visibility_target_label(row, observable_minutes), zorder=3)
         altitude_rows.append(np.asarray(altitude, dtype=float))
         altitude_names.append(str(row.get("Target", "Target")))
+
+    colorbar = None
 
     # Lower panel: one horizontal time bar per target, colored by altitude.
     # Values below 30 degrees are shown as a pale background; the color scale
@@ -379,8 +466,29 @@ def plot_nightly_visibility(
             cmap=cmap, norm=norm, interpolation="nearest",
         )
         altitude_bar_axis.set_yticks(np.arange(len(altitude_names)))
-        altitude_bar_axis.set_yticklabels(altitude_names, fontsize=7)
+        altitude_bar_axis.set_yticklabels(
+            altitude_names, fontsize=8 if target_count <= 45 else 7
+        )
+        altitude_bar_axis.hlines(
+            np.arange(-.5, len(altitude_names) + .5, 1),
+            x_edges[0], x_edges[-1], colors="black", linewidth=.22, zorder=4,
+        )
         altitude_bar_axis.set_ylabel("Targets", fontsize=8)
+        # Print the current magnitude alongside each altitude bar on the right.
+        # It is a row annotation rather than a second scientific scale.
+        magnitude_axis = altitude_bar_axis.twinx()
+        magnitude_axis.patch.set_visible(False)
+        magnitude_axis.spines["left"].set_visible(False)
+        magnitude_axis.spines["right"].set_visible(False)
+        magnitude_axis.yaxis.set_label_position("right")
+        magnitude_axis.yaxis.tick_right()
+        magnitude_axis.set_ylim(altitude_bar_axis.get_ylim())
+        magnitude_axis.set_yticks(np.arange(len(altitude_names)))
+        magnitude_axis.set_yticklabels(
+            [_visibility_magnitude_label(row) for _, row in unique.iterrows()],
+            fontsize=8 if target_count <= 45 else 7,
+        )
+        magnitude_axis.tick_params(axis="y", length=0, pad=4)
         altitude_bar_axis.set_xlabel(f"Local time\n[{timezone.key}]")
         altitude_bar_axis.grid(False)
         colorbar = fig.colorbar(
@@ -410,6 +518,8 @@ def plot_nightly_visibility(
         f"Target visibility — {observatory_name} — {pd.Timestamp(night).date()} "
         f"(allocated: {_window_label(windows)})"
     )
+    if part_label:
+        title = f"{title} — {part_label}"
     # Both panels share the time axis, but keep tick labels visible on both.
     for panel in (ax, altitude_bar_axis):
         panel.xaxis.set_major_locator(mdates.HourLocator(interval=1, tz=timezone))
@@ -463,16 +573,40 @@ def plot_nightly_visibility(
         Patch(facecolor="0.20", alpha=.20, label="Outside allocated time")
     ]
     handles, labels = ax.get_legend_handles_labels()
-    legend_items = len(handles) + len(twilight_handles) + len(allocation_handles)
+    source_style_handles = []
+    if show_source_styles:
+        source_style_handles = [
+            Line2D(
+                [0], [0], color="0.15", lw=1.35,
+                ls={"MOP-only": "-", "HSH/JS-observed": "--", "Other targets": "-."}[group],
+                label=f"{group} target",
+            )
+            for group in ("MOP-only", "HSH/JS-observed", "Other targets")
+            if group in source_groups
+        ]
+    legend_items = (
+        len(handles) + len(source_style_handles) + len(twilight_handles)
+        + len(allocation_handles)
+    )
     ncol = min(8, max(4, int(np.ceil(legend_items / 8))))
     legend = fig.legend(
-        handles + twilight_handles + allocation_handles,
-        labels + [item.get_label() for item in twilight_handles + allocation_handles],
+        handles + source_style_handles + twilight_handles + allocation_handles,
+        labels + [item.get_label() for item in source_style_handles + twilight_handles + allocation_handles],
         loc="upper center", bbox_to_anchor=(.5, .95), ncol=ncol,
         fontsize=7, frameon=False, borderaxespad=0.,
     )
     fig.suptitle(title, y=.98, fontsize=10)
-    fig.subplots_adjust(hspace=.12, bottom=.18, top=.83, left=.08, right=.94)
+    fig.subplots_adjust(hspace=.12, bottom=.18, top=.83, left=.08, right=.91)
+    # ``subplots_adjust`` can otherwise move the colorbar over the altitude
+    # matrix. Reposition it explicitly below the lower panel.
+    if colorbar is not None:
+        bar_panel = altitude_bar_axis.get_position()
+        colorbar.ax.set_position([
+            bar_panel.x0 + .15 * bar_panel.width,
+            max(.035, bar_panel.y0 - .068),
+            .70 * bar_panel.width,
+            .014,
+        ])
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=170, bbox_inches="tight", pad_inches=.08)
     plt.close(fig)
@@ -493,11 +627,12 @@ def save_selected_visibility_plots(
     output_dir: str | Path,
     *,
     date_column: str = "observation_date",
+    max_targets_per_plot: int = 20,
     overwrite: bool = False,
     verbose: bool = True,
     **plot_options,
 ) -> list[Path]:
-    """Create final visibility plots for an observer-selected table."""
+    """Create source-aware final visibility plots with at most 20 targets each."""
     if date_column not in selected_targets:
         raise ValueError(f"Missing date column: {date_column}")
     output_dir = Path(output_dir)
@@ -505,17 +640,124 @@ def save_selected_visibility_plots(
     dates = pd.to_datetime(selected_targets[date_column], errors="coerce").dt.date.dropna().unique()
     paths = []
     for index, night in enumerate(sorted(dates), start=1):
-        path = output_dir / f"{night.isoformat()}_selected_visibility.png"
-        paths.append(path)
-        if path.exists() and not overwrite:
-            continue
         mask = pd.to_datetime(selected_targets[date_column], errors="coerce").dt.date.eq(night)
         nightly = selected_targets.loc[mask].copy()
-        plot_selected_visibility(nightly, night, path, **plot_options)
+        parts = _split_visibility_targets(nightly, max_targets_per_plot=max_targets_per_plot)
+        expected = []
+        for part_index, (source_group, part) in enumerate(parts, start=1):
+            if len(parts) == 1:
+                path = output_dir / f"{night.isoformat()}_selected_visibility.png"
+                label = None
+            else:
+                path = output_dir / (
+                    f"{night.isoformat()}_selected_part_{part_index:02d}_"
+                    f"{_visibility_part_slug(source_group)}_visibility.png"
+                )
+                label = f"{source_group} — part {part_index}/{len(parts)}"
+            expected.append((path, part, label))
+        stale = [output_dir / f"{night.isoformat()}_selected_visibility.png"]
+        stale.extend(output_dir.glob(f"{night.isoformat()}_selected_part_*_visibility.png"))
+        for path in stale:
+            if path not in {item[0] for item in expected}:
+                path.unlink(missing_ok=True)
+        for path, part, label in expected:
+            paths.append(path)
+            if path.exists() and not overwrite:
+                continue
+            plot_selected_visibility(part, night, path, part_label=label, **plot_options)
         if verbose:
-            print(f"      selected visibility: {index}/{len(dates)} ({night}, {len(nightly)} targets)", flush=True)
+            print(
+                f"      selected visibility: {index}/{len(dates)} "
+                f"({night}, {len(nightly)} targets, {len(parts)} plot(s))",
+                flush=True,
+            )
     return paths
 
+
+
+
+def compile_visibility_plot_pages(
+    visibility_plots: str | Path | list[str | Path],
+    output_path: str | Path,
+) -> Path:
+    """Compile already-generated nightly visibility PNGs into a dated PDF.
+
+    One PDF page is written per observing date. Every source-aware part for
+    that date remains a separate panel, preserving the exact target labels,
+    styles, and criteria of the PNG produced by ``save_nightly_visibility_plots``.
+    """
+    if isinstance(visibility_plots, (str, Path)):
+        candidate = Path(visibility_plots)
+        image_paths = (
+            sorted(candidate.glob("*_visibility.png"))
+            if candidate.is_dir() else [candidate]
+        )
+    else:
+        image_paths = sorted(Path(path) for path in visibility_plots)
+    image_paths = [
+        path for path in image_paths
+        if path.exists() and path.suffix.lower() == ".png" and len(path.name) >= 10
+    ]
+    dated_paths: dict[str, list[Path]] = {}
+    for path in image_paths:
+        date_text = path.name[:10]
+        try:
+            pd.Timestamp(date_text)
+        except (TypeError, ValueError):
+            continue
+        dated_paths.setdefault(date_text, []).append(path)
+    if not dated_paths:
+        raise ValueError("No generated nightly visibility PNGs were found.")
+
+    destination = Path(output_path).with_suffix(".pdf")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    with PdfPages(destination) as pdf:
+        for date_text, paths in sorted(dated_paths.items()):
+            panels = []
+            for path in sorted(paths):
+                image = plt.imread(path)
+                height = 11.0 * image.shape[0] / image.shape[1]
+                panels.append((path, image, height))
+            page_height = max(5.0, 1.30 + sum(height for _, _, height in panels) + .32 * len(panels))
+            fig = plt.figure(figsize=(12.0, page_height))
+            fig.suptitle(
+                "Nightly target-visibility plots", x=.04, y=.988,
+                ha="left", fontsize=14, weight="bold",
+            )
+            fig.text(
+                .04, .965,
+                "Panels are the generated visibility plots; titles identify the target group and part.",
+                ha="left", va="top", fontsize=8,
+            )
+            fig.text(
+                .965, .983, f"Observing date\n{date_text}",
+                ha="right", va="top", fontsize=10, weight="bold",
+                bbox={"boxstyle": "round,pad=.35", "facecolor": "#edf4fb", "edgecolor": "#4d6d8a"},
+            )
+            cursor = page_height - 1.10
+            for panel_index, (path, image, height) in enumerate(panels, start=1):
+                stem = path.stem
+                if "_part_" in stem:
+                    suffix = stem.split("_part_", 1)[1].removesuffix("_visibility")
+                    part_number, source = suffix.split("_", 1)
+                    source = source.replace("mop-only", "MOP-only").replace(
+                        "hsh-js-observed", "HSH/JS-observed"
+                    ).replace("-", " ")
+                    caption = f"{source} — part {int(part_number)}/{len(panels)}"
+                else:
+                    caption = "All selected targets"
+                cursor -= .20
+                fig.text(.04, cursor / page_height, caption, ha="left", va="top", fontsize=9, weight="bold")
+                cursor -= height
+                axis = fig.add_axes([.04, cursor / page_height, .92, height / page_height])
+                axis.imshow(image)
+                axis.axis("off")
+                cursor -= .12
+            pdf.savefig(fig, bbox_inches="tight", pad_inches=.05)
+            plt.close(fig)
+    return destination
 
 
 def plot_visibility_sequence(
@@ -800,10 +1042,11 @@ def save_nightly_visibility_plots(
     observing_windows=None,
     target_scope: str = "mop_daily",
     selection: pd.DataFrame | None = None,
+    max_targets_per_plot: int = 20,
     overwrite: bool = False,
     verbose: bool = True,
 ) -> list[Path]:
-    """Create one automatically filtered visibility plot per requested date."""
+    """Create source-aware filtered visibility plots with at most 20 targets each."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     visibility_config = {
@@ -813,6 +1056,7 @@ def save_nightly_visibility_plots(
         "time_step_minutes": int(time_step_minutes),
         "observing_windows": observing_windows,
         "target_scope": target_scope,
+        "max_targets_per_plot": int(max_targets_per_plot),
     }
     config_path = output_dir / "visibility_plot_config.json"
     try:
@@ -831,22 +1075,44 @@ def save_nightly_visibility_plots(
     paths = []
     for index, night in enumerate(dates, start=1):
         night_string = night.date().isoformat()
-        path = output_dir / f"{night_string}_visibility.png"
-        paths.append(path)
         evaluated = selection.loc[
             selection.get("observation_date", pd.Series(dtype=str)).astype(str).eq(night_string)
         ].copy()
         selected = evaluated.loc[evaluated["selected_for_visibility"].astype(bool)].copy()
-        if not path.exists() or effective_overwrite:
+        parts = _split_visibility_targets(
+            selected, max_targets_per_plot=max_targets_per_plot
+        )
+        expected = []
+        for part_index, (source_group, part) in enumerate(parts, start=1):
+            if len(parts) == 1:
+                path = output_dir / f"{night_string}_visibility.png"
+                label = None
+            else:
+                path = output_dir / (
+                    f"{night_string}_part_{part_index:02d}_"
+                    f"{_visibility_part_slug(source_group)}_visibility.png"
+                )
+                label = f"{source_group} — part {part_index}/{len(parts)}"
+            expected.append((path, part, label))
+        stale = [output_dir / f"{night_string}_visibility.png"]
+        stale.extend(output_dir.glob(f"{night_string}_part_*_visibility.png"))
+        for path in stale:
+            if path not in {item[0] for item in expected}:
+                path.unlink(missing_ok=True)
+        for path, part, label in expected:
+            paths.append(path)
+            if path.exists() and not effective_overwrite:
+                continue
             plot_nightly_visibility(
-                selected, night_string, path, observatory=observatory,
+                part, night_string, path, observatory=observatory,
                 minimum_altitude=minimum_altitude, time_step_minutes=time_step_minutes,
-                observing_windows=observing_windows,
+                observing_windows=observing_windows, part_label=label,
             )
         if verbose:
             print(
                 f"      visibility: {index}/{len(dates)} "
-                f"({night_string}, {len(selected)}/{len(evaluated)} selected)", flush=True,
+                f"({night_string}, {len(selected)}/{len(evaluated)} selected, "
+                f"{len(parts)} plot(s))", flush=True,
             )
     if not selection.empty:
         selection.to_csv(output_dir / "visibility_selection.csv", index=False)

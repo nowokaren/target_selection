@@ -8,7 +8,9 @@ from target_selection_pipeline import (
     run_target_selection,
     save_target_reports,
     summarize_release_coverage,
+    _apply_authoritative_mop_coordinates,
     _filter_invalid_mop_magnitudes,
+    _visibility_daily_targets,
 )
 
 
@@ -24,6 +26,12 @@ def test_run_directory_includes_observing_schedule(tmp_path):
         observing_windows={"default": ("18:00", "06:00"), "2026-08-10": ("21:00", "03:00")},
     )
     assert varied["run"].name.startswith("2026-08-09_to_2026-08-12__obs_18-00_to_06-00_varied-")
+
+    named = create_run_structure(
+        tmp_path, "2026-08-09", "2026-08-12", "DP2",
+        observing_windows=("02:00", "07:00"), run_name="August planning",
+    )
+    assert named["run"].name == "August_planning_2026-08-09_to_2026-08-12__obs_02-00_to_07-00"
 
 
 def test_dp2_profile_is_available():
@@ -94,9 +102,11 @@ class _FakeTapService:
     def __init__(self, frame):
         self.frame = frame
         self.query = None
+        self.queries = []
 
     def submit_job(self, query):
         self.query = query
+        self.queries.append(query)
         return _FakeJob(self.frame)
 
 
@@ -236,12 +246,18 @@ class _FakeMop:
         return daily_targets.assign(
             mop_t_0_hjd="2460000.0", mop_t_e_days="20.0", mop_u_0="0.1",
             mop_parameters_status="available", n_visible_nights=1,
+            mop_ra="00:40:29.630", mop_dec="-20:07:24.44",
+            mop_ra_deg=10.1234567890123, mop_dec_deg=-20.1234567890123,
+            mop_coordinate_source="target_page",
         )
 
     def enrich_microlensing_parameters(self, targets, **kwargs):
         return targets.assign(
             mop_t_0_hjd="2460000.0", mop_t_e_days="20.0", mop_u_0="0.1",
             mop_parameters_status="available",
+            mop_ra="17:58:09.830", mop_dec="-19:58:40.80",
+            mop_ra_deg=269.54095833333326, mop_dec_deg=-19.978,
+            mop_coordinate_source="target_page",
         )
 
 
@@ -250,7 +266,8 @@ def test_pipeline_queries_visible_and_previously_observed_targets(tmp_path):
         "filename": ["old_i_wcs.fits"], "object": ["OGLE-2025-BLG-0001"],
         "imagetyp": ["object"], "astromet": ["yes"], "obj_stat": ["OK"],
         "clmatch": [True], "mjd-obs": [60000.0], "filter": ["(5) I"],
-        "exptime": [300.0], "airmass": [1.2], "crval1": [11.0], "crval2": [-21.0],
+        "exptime": [300.0], "airmass": [1.2],
+        "crval1": [269.563841528], "crval2": [-19.998130225],
     })
     hsh_path = tmp_path / "hsh.csv"
     hsh.to_csv(hsh_path, index=False)
@@ -262,29 +279,45 @@ def test_pipeline_queries_visible_and_previously_observed_targets(tmp_path):
     additional = pd.DataFrame({
         "Target": ["manual-event"], "RA_deg": [266.4], "Dec_deg": [-29.0],
     })
+    mop_cache = tmp_path / "outputs" / "mop_photometry"
+    mop_cache.mkdir(parents=True)
+    pd.DataFrame({"Timestamp": ["2026-08-01T00:00:00Z"]}).to_csv(
+        mop_cache / "visible-event.csv", index=False
+    )
     combined, paths = run_target_selection(
         "2026-08-01", data_release="DP2", root_dir=tmp_path / "outputs",
         mop=_FakeMop(), tap_service=tap, target_plotter=False,
         generate_visibility_plots=False, hsh_image_catalog=hsh_path,
-        additional_targets=additional, visibility_time_step_minutes=60, verbose=False,
+        additional_targets=additional, visibility_time_step_minutes=60,
+        max_workers=1, verbose=False,
     )
 
-    assert set(combined["Target"]) == {"visible-event", "OGLE-2025-BLG-0001", "manual-event"}
+    assert set(combined["Target"]) == {"visible-event", "OGLE-2025-BLG-0001"}
     assert "invalid-zero-magnitude" not in set(combined["Target"])
     assert "invalid-zero-magnitude" not in set(pd.read_csv(paths["tables"] / "visible_targets_daily.csv")["Target"])
-    assert combined.set_index("Target").loc["OGLE-2025-BLG-0001", "is_previously_observed"]
+    indexed = combined.set_index("Target")
+    assert indexed.loc["OGLE-2025-BLG-0001", "is_previously_observed"]
+    assert indexed.loc["visible-event", "RA_deg"] == 10.1234567890123
+    assert indexed.loc["visible-event", "Dec_deg"] == -20.1234567890123
+    assert indexed.loc["OGLE-2025-BLG-0001", "RA_deg"] == 269.54095833333326
+    assert indexed.loc["OGLE-2025-BLG-0001", "Dec_deg"] == -19.978
+    assert indexed.loc["OGLE-2025-BLG-0001", "coordinate_source"] == "MOP target page"
+    assert indexed.loc["OGLE-2025-BLG-0001", "target_region"] == "BLG"
+    assert any("269.54095833333326" in query and "-19.978" in query for query in tap.queries)
+    assert not any("269.563841528" in query for query in tap.queries)
     assert (paths["tables"] / "analysis_targets.csv").exists()
     visibility_summary = pd.read_csv(paths["tables"] / "visibility_target_summary.csv")
     assert {"Target", "mag_now", "passes_visibility_filter", "max_observable_minutes"} <= set(visibility_summary)
-    assert set(visibility_summary["Target"]) == {"visible-event", "OGLE-2025-BLG-0001", "manual-event"}
+    assert set(visibility_summary["Target"]) == {"visible-event", "OGLE-2025-BLG-0001"}
     assert visibility_summary.set_index("Target").loc["visible-event", "mag_now"] == 18.0
     queried = pd.read_csv(paths["tables"] / "queried_targets.csv")
-    assert set(queried["Target"]) == {"visible-event", "OGLE-2025-BLG-0001", "manual-event"}
-    assert set(queried["query_source"]) == {"MOP visible", "Previously observed", "User supplied"}
-    assert queried.set_index("Target").loc["manual-event", "is_user_supplied"]
+    assert set(queried["Target"]) == {"visible-event", "OGLE-2025-BLG-0001"}
+    assert set(queried["query_source"]) == {"MOP visible", "Previously observed"}
+    excluded_by_data = pd.read_csv(paths["tables"] / "targets_without_selected_data.csv")
+    assert excluded_by_data["Target"].tolist() == ["manual-event"]
     assert (paths["tables"] / "coverage_targets.csv").exists()
     observing_summary = pd.read_csv(paths["tables"] / "observing_selection_summary.csv")
-    assert {"Target", "mag_now", "visible_hours", "visible_from", "visible_to"} <= set(observing_summary)
+    assert {"Target", "target_region", "mag_now", "visible_hours", "visible_from", "visible_to"} <= set(observing_summary)
     assert (paths["tables"] / "observing_selection_summary.png").exists()
 
 
@@ -293,3 +326,88 @@ def test_magnitude_cut_discards_faint_targets_but_keeps_missing_values():
     filtered, excluded = _filter_invalid_mop_magnitudes(targets, max_current_magnitude=18.0)
     assert filtered["Target"].tolist() == ["bright", "unknown"]
     assert excluded == 1
+
+
+def test_mop_page_coordinates_override_pointing_without_rounding():
+    targets = pd.DataFrame({
+        "Target": ["OGLE-2025-BLG-0451"],
+        "RA_deg": [269.563841528], "Dec_deg": [-19.998130225],
+        "mop_ra": ["17:58:09.830"], "mop_dec": ["-19:58:40.80"],
+        "mop_ra_deg": [269.54095833333326], "mop_dec_deg": [-19.978],
+    })
+
+    corrected = _apply_authoritative_mop_coordinates(targets).iloc[0]
+
+    assert corrected["RA_deg"] == 269.54095833333326
+    assert corrected["Dec_deg"] == -19.978
+    assert corrected["coordinate_source"] == "MOP target page"
+    assert corrected["coordinate_was_overridden"]
+    assert abs(corrected["coordinate_offset_arcsec"] - 106.0432) < 0.001
+
+
+def test_mop_daily_visibility_uses_enriched_page_coordinates():
+    daily = pd.DataFrame({
+        "Target": ["OGLE-TEST"], "RA_deg": [10.0], "Dec_deg": [-20.0],
+        "observation_date": ["2026-08-01"],
+    })
+    enriched = pd.DataFrame({
+        "Target": ["OGLE-TEST"],
+        "RA_deg": [10.1234567890123], "Dec_deg": [-20.1234567890123],
+        "mag_now": [17.2],
+    })
+
+    result = _visibility_daily_targets(
+        enriched, "2026-08-01", "2026-08-01", scope="mop_daily", mop_daily=daily,
+    ).iloc[0]
+
+    assert result["RA_deg"] == 10.1234567890123
+    assert result["Dec_deg"] == -20.1234567890123
+    assert result["mag_now"] == 17.2
+
+
+def test_visibility_daily_targets_retains_source_provenance():
+    targets = pd.DataFrame({
+        "Target": ["mop", "hsh"],
+        "RA_deg": [10.0, 11.0], "Dec_deg": [-20.0, -21.0],
+        "is_mop_visible_in_run": [True, False],
+        "is_previously_observed": [False, True],
+        "observatory_providers": ["", "HSH"],
+    })
+
+    result = _visibility_daily_targets(
+        targets, "2026-08-01", "2026-08-01", scope="all_queried",
+        mop_daily=pd.DataFrame(),
+    ).set_index("Target")
+
+    assert result.loc["mop", "is_mop_visible_in_run"]
+    assert result.loc["hsh", "is_previously_observed"]
+    assert result.loc["hsh", "observatory_providers"] == "HSH"
+
+
+class _FakeMopWithoutEventData(_FakeMop):
+    def visible_targets(self, **kwargs):
+        return pd.DataFrame({
+            "Target": ["no-data-event"], "RA_deg": [10.0], "Dec_deg": [-20.0],
+            "mag_now": [18.0], "observation_date": ["2026-08-01"],
+        })
+
+    def visibility_summary(self, *, daily_targets, **kwargs):
+        return daily_targets.assign(mop_parameters_status="unavailable")
+
+
+def test_pipeline_excludes_mop_visible_candidates_without_event_data(tmp_path):
+    tap = _FakeTapService(pd.DataFrame({
+        "visitId": [1], "expMidptMJD": [60000.0], "band": ["i"],
+        "detector": [2], "seeing": [0.8], "magLim": [24.0],
+    }))
+    combined, paths = run_target_selection(
+        "2026-08-01", data_release="DP2", root_dir=tmp_path / "outputs",
+        mop=_FakeMopWithoutEventData(), tap_service=tap, target_plotter=False,
+        generate_visibility_plots=False, max_workers=1, verbose=False,
+    )
+
+    assert combined.empty
+    excluded = pd.read_csv(paths["tables"] / "mop_candidates_without_data.csv")
+    assert excluded["Target"].tolist() == ["no-data-event"]
+    assert excluded.iloc[0]["excluded_missing_mop_data"]
+    assert pd.read_csv(paths["tables"] / "visible_summary.csv").empty

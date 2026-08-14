@@ -51,6 +51,82 @@ def test_observing_selection_summary_groups_stage_time_and_saves_products(tmp_pa
     assert csv_path.exists() and png_path.exists() and png_path.stat().st_size > 0
 
 
+
+
+def test_observing_summary_prefers_ogle_i_for_last_magnitude(tmp_path):
+    targets = pd.DataFrame({
+        "Target": ["event"], "passes_visibility_filter": [True],
+        "max_observable_minutes": [90.0], "mag_now": [17.0],
+        "mop_t_0_hjd": [float("nan")], "mop_t_e_days": [float("nan")],
+    })
+    photometry = tmp_path / "mop"
+    photometry.mkdir()
+    pd.DataFrame({
+        "Timestamp": ["2026-01-03", "2026-01-04", "2026-01-05"],
+        "Filter": ["G", "OGLE_I", "r"],
+        "Magnitude": [17.4, 16.8, 18.1],
+        "Telescope": ["Gaia", "", "Other scope"],
+        "Source": ["Gaia", "OGLE", "Other"],
+    }).to_csv(photometry / "event.csv", index=False)
+
+    summary = build_observing_selection_summary(
+        targets, pd.DataFrame(), photometry, include_reference=False,
+    ).iloc[0]
+
+    assert summary["last_mag"] == 16.8
+    assert summary["last_mag_filter"] == "I"
+
+
+def test_observing_summary_abbreviates_long_last_filter_names(tmp_path):
+    targets = pd.DataFrame({
+        "Target": ["event"], "passes_visibility_filter": [True],
+        "max_observable_minutes": [90.0], "mag_now": [17.0],
+        "mop_t_0_hjd": [float("nan")], "mop_t_e_days": [float("nan")],
+    })
+    photometry = tmp_path / "mop"
+    photometry.mkdir()
+    pd.DataFrame({
+        "Timestamp": ["2026-01-05"],
+        "Filter": ["Very-long-custom-filter-name"],
+        "Magnitude": [17.2],
+    }).to_csv(photometry / "event.csv", index=False)
+
+    summary = build_observing_selection_summary(
+        targets, pd.DataFrame(), photometry, include_reference=False,
+    ).iloc[0]
+
+    assert summary["last_mag_filter"] == "Very-long-c…"
+
+def test_observing_summary_uses_boolean_visibility_flags_after_csv_roundtrip(tmp_path):
+    targets = pd.DataFrame({
+        "Target": ["selected", "rejected"],
+        "passes_visibility_filter": ["True", "False"],
+        "max_observable_minutes": [90.0, 120.0],
+        "mag_now": [17.1, 17.2],
+    })
+    summary = build_observing_selection_summary(
+        targets, pd.DataFrame(), tmp_path / "missing", include_reference=False,
+    )
+    assert summary["Target"].tolist() == ["selected"]
+
+
+def test_observing_summary_marks_rows_without_current_mop_data(tmp_path):
+    targets = pd.DataFrame({
+        "Target": ["mop-data", "no-mop-data"],
+        "passes_visibility_filter": [True, True],
+        "max_observable_minutes": [90.0, 90.0],
+        "mag_now": [17.1, 0.0],
+        "mop_t_e_days": [20.0, float("nan")],
+        "mop_t_0_hjd": [2461200.0, float("nan")],
+        "mop_u_0": [0.2, float("nan")],
+    })
+    summary = build_observing_selection_summary(
+        targets, pd.DataFrame(), tmp_path / "missing", include_reference=False,
+    ).set_index("Target")
+    assert summary.loc["mop-data", "has_current_mop_data"]
+    assert not summary.loc["no-mop-data", "has_current_mop_data"]
+    assert not summary.loc["no-mop-data", "stage_classification_available"]
+
 def test_observing_selection_summary_excludes_hsh_only_targets(tmp_path):
     targets = pd.DataFrame({
         "Target": ["hsh-only"], "passes_visibility_filter": [False],

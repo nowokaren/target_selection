@@ -1,0 +1,34 @@
+site_name: Target Selection
+site_description: Follow-up target selection and observing-planning documentation
+site_author: Karen Nowok
+repo_name: nowokaren/target_selection
+repo_url: https://github.com/nowokaren/target_selection
+edit_uri: edit/main/docs/
+
+theme:
+  name: readthedocs
+  highlightjs: true
+  navigation_depth: 3
+
+nav:
+  - Home: index.md
+  - Quick start: quickstart.md
+  - How it works: how-it-works.md
+  - Usage modes: usage-modes.md
+  - Configuration: configuration.md
+  - Data and cache: data-and-cache.md
+  - Products: products.md
+  - Python and CLI API: api.md
+  - Extending the tool:
+      - Architecture: architecture.md
+      - Adding a source: adding_sources.md
+  - Publish on Read the Docs: publishing.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+
+strict: true

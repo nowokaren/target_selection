@@ -80,8 +80,11 @@ def load_hsh_astrometry_catalog(path: str | Path) -> pd.DataFrame:
     science["exptime_s"] = pd.to_numeric(science["exptime"], errors="coerce")
     science["airmass_value"] = pd.to_numeric(science["airmass"], errors="coerce")
     science["band"] = _short_filter(science["filter"])
-    science["ra_deg"] = pd.to_numeric(science.get("crval1"), errors="coerce")
-    science["dec_deg"] = pd.to_numeric(science.get("crval2"), errors="coerce")
+    # CRVAL1/CRVAL2 locate the WCS reference point of each image. They are
+    # pointing metadata, not the event coordinates, and must never populate
+    # the canonical target position.
+    science["pointing_ra_deg"] = pd.to_numeric(science.get("crval1"), errors="coerce")
+    science["pointing_dec_deg"] = pd.to_numeric(science.get("crval2"), errors="coerce")
     science["target_in_frame"] = science["obj_stat"].astype(str).str.upper().eq("OK")
     science["catalogue_match"] = science["clmatch"].fillna(False).astype(bool)
     science["usable"] = science["target_in_frame"] & science["catalogue_match"]

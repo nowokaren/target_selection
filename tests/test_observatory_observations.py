@@ -52,8 +52,13 @@ def test_hsh_loader_prefers_curated_objname(tmp_path):
         "imagetyp": ["object"], "astromet": ["yes"],
         "obj_stat": ["OK"], "clmatch": [True], "mjd-obs": [60000.0],
         "filter": ["I"], "exptime": [300.0], "airmass": [1.2],
+        "crval1": [269.563841528], "crval2": [-19.998130225],
     })
     path = tmp_path / "hsh.csv"
     catalogue.to_csv(path, index=False)
     loaded = load_hsh_astrometry_catalog(path)
     assert loaded.loc[0, "source_target"] == "OGLE-2024-BLG-0006"
+    assert loaded.loc[0, "pointing_ra_deg"] == 269.563841528
+    assert loaded.loc[0, "pointing_dec_deg"] == -19.998130225
+    assert "ra_deg" not in loaded
+    assert "dec_deg" not in loaded

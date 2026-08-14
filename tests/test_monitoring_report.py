@@ -1,7 +1,8 @@
 import pandas as pd
+import monitoring_report
 
 from monitoring_report import (
-    _microlensing_zoom_limits, create_monitoring_report, plot_monitoring_lightcurve,
+    _microlensing_zoom_limits, _monitoring_future_xmax, create_monitoring_report, plot_monitoring_lightcurve,
 )
 
 
@@ -30,6 +31,25 @@ def test_monitoring_report_writes_pdf(tmp_path):
     assert output.exists() and output.stat().st_size > 0
     assert result["n_targets"] == 1
 
+
+
+def test_monitoring_report_sorts_targets_by_current_magnitude(tmp_path, monkeypatch):
+    targets = pd.DataFrame({
+        "Target": ["faint", "unknown", "bright", "zero"],
+        "mag_now": [18.4, float("nan"), 14.2, 0.0],
+    })
+    plotted: list[str] = []
+
+    def capture_target(target, *_args, **kwargs):
+        plotted.append(str(target["Target"]))
+        return kwargs["ax"]
+
+    monkeypatch.setattr(monitoring_report, "plot_monitoring_lightcurve", capture_target)
+    create_monitoring_report(
+        targets, tmp_path / "ordered.pdf", mop=None, mop_photometry_dir=tmp_path,
+        layers=(), plots_per_page=4,
+    )
+    assert plotted == ["bright", "faint", "unknown", "zero"]
 
 def test_monitoring_layers_can_use_local_photometry_or_epoch_markers():
     import matplotlib.pyplot as plt
@@ -89,3 +109,20 @@ def test_microlensing_zoom_uses_hjd_and_nominal_mop_values():
     assert limits is not None
     assert limits[1] - limits[0] == 80.0
     assert _microlensing_zoom_limits(pd.Series({"mop_t_0_hjd": "unknown"})) is None
+
+
+def test_monitoring_plot_extends_to_two_calendar_months_after_creation():
+    import matplotlib.dates as mdates
+    import matplotlib.pyplot as plt
+
+    future_xmax = _monitoring_future_xmax("2026-08-13T12:00:00Z")
+    expected = mdates.date2num(pd.Timestamp("2026-10-13T12:00:00"))
+    assert future_xmax == expected
+
+    figure, axis = plt.subplots()
+    plot_monitoring_lightcurve(
+        pd.Series({"Target": "event"}), pd.DataFrame(), ax=axis,
+        layers=(), future_xmax=future_xmax,
+    )
+    assert axis.get_xlim()[1] == expected
+    plt.close(figure)

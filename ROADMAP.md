@@ -1,5 +1,7 @@
 # Target Selection 2.0 roadmap
 
+The 0.2 development branch now provides the source-neutral foundation: normalized target-provider, follow-up-survey, and reference-survey adapters; shared TOML configuration; persistent source/photometry/run provenance; multi-reference execution; planning-only execution; CLI; and product indexes. The scientific ranking and scheduler described below remain future work requiring validation.
+
 This document records proposed features that require scientific and operational validation before implementation. Version 1 remains focused on assembling MOP and Rubin information and producing diagnostic products.
 
 ## Goal

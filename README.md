@@ -1,10 +1,37 @@
 # MOP target selection with Rubin coverage
 
-This project cross-matches visible MOP targets with a Rubin Data Preview/Data Release and generates tables, sky maps, and graphical reports for each target. The currently validated run uses **DP2**; the DP0.1, DP0.2, and DP1 profiles may require collection or table adjustments for a specific RSP deployment.
+This project combines candidate events from target providers, observing history from follow-up surveys, and contextual data from reference surveys to support follow-up planning. Current built-in sources include MOP, CASLEO/HSH, normalized CSV surveys such as CASLEO/JS, and Rubin Data Preview/Data Release collections. The v0.1 MOP + DP2 workflow remains available as a compatible low-level API.
+
+## Recommended interface
+
+Select active sources in `configs/example.toml`; the frequently changed dates, observatory, sources, and scientific cuts are at the top. Source paths, cache policy, and runtime details are grouped below.
+
+```bash
+target-selection validate-config --config configs/example.toml
+target-selection list-sources
+target-selection run --config configs/example.toml
+```
+
+The same configuration is used from Python or the notebook:
+
+```python
+from target_selection import load_config, run_analysis
+
+config = load_config("configs/example.toml")
+result = run_analysis(config)
+dp2_targets = result.runs["rubin_dp2"].targets
+```
+
+The three source roles are target providers (MOP and future OMP), follow-up surveys (CASLEO/HSH and CASLEO/JS), and reference surveys (Rubin DP1/DP2). See `docs/architecture.md`, `docs/adding_sources.md`, and `docs/products.md`.
+
+
 
 ## Project files
 
-- `mop_lsst.ipynb`: ordered entry point for an interactive run.
+- `mop_lsst.ipynb`: ordered interactive entry point using the shared TOML configuration.
+- `target_selection/`: normalized configuration, adapters, workflow, and CLI.
+- `configs/example.toml`: ordered configuration shared by CLI and notebook.
+- `docs/`: architecture, extension, and product guides.
 - `target_selection_pipeline.py`: orchestration, queries, caching, tables, and sky maps.
 - `mop_photometry.py`: MOP photometry loading, caching, and preparation.
 - `target_report.py`: graphical dashboard for each target.
@@ -29,37 +56,15 @@ python -m pip install -e .
 
 The installation automatically downloads the tested `mop_api` version from GitHub. The `lsst.*` libraries are supplied by the RSP environment and are not installed with pip.
 
-## Quick start
+## Notebook
 
-Open `mop_lsst.ipynb` and edit the **Configuration** cell:
+Open `mop_lsst.ipynb`, edit `configs/example.toml`, restart the kernel, and select **Run All**. The notebook loads `AnalysisConfig`, calls `run_analysis(config)`, and displays the products of the first selected reference survey. Additional reference-survey results remain available in `analysis_result.runs`.
 
-```python
-DATA_RELEASE_NAME = "DP2"  # DP0.1, DP0.2, DP1, or DP2
-START_DATE = "2026-08-01"
-END_DATE = "2026-08-15"
-OUTPUT_DIR = Path("outputs")
-OBSERVATORY = "El Leoncito"
+The first run may take time because it refreshes the configured providers and surveys; later runs reuse the persistent registry and provider-specific caches.
 
-SKY_MARKER_ENCODING = "split_color"  # or "color_size"
-SHOW_COVERAGE_BACKGROUND = False
-COVERAGE_RESOLUTION = 19
+## Legacy low-level API
 
-# Optional: measure Rubin PSF fluxes on deep coadds at the target coordinates.
-GENERATE_RELEASE_PHOTOMETRY = True
-RELEASE_PHOTOMETRY_TARGETS = None  # Or a list such as ["OGLE-2026-BLG-0001"]
-
-# Optional local HSH astrometry catalogue; use None when it is unavailable.
-HSH_IMAGE_CATALOG = Path("hsh_data/image_collection_astro.csv")
-INCLUDE_PREVIOUSLY_OBSERVED = True
-PREVIOUSLY_OBSERVED_PROVIDERS = ("HSH", "JS")  # Or ("HSH",)
-# Optional DataFrame or CSV path; columns: Target, RA_deg, Dec_deg.
-ADDITIONAL_TARGETS = None
-VISIBILITY_TARGET_SCOPE = "all_queried"  # Or "mop_daily"
-GENERATE_MONITORING_REPORT = True
-MONITORING_REPORT_PLOTS_PER_PAGE = 3
-```
-
-Restart the kernel and select **Run All**. The main function is `run_target_selection(...)`; it automatically creates the MOP, TAP, and Butler clients and uses the standard report generator. The first run may take time because it queries MOP, TAP, and Butler; later runs reuse caches.
+`run_target_selection(...)` remains available for advanced single-Rubin-release calls and dependency injection.
 
 - `max_workers=4`: query concurrency.
 - `reuse_cache=True`: reuse previous downloads and queries.
@@ -68,7 +73,8 @@ Restart the kernel and select **Run All**. The main function is `run_target_sele
 - `GENERATE_TARGET_REPORTS=False`: skip individual target dashboard PNGs when only aggregate MOP/HSH products are needed; set `True` to enable them.
 - `target_plotter=False`: skip individual reports.
 - `target_report_scope="all_queried"`: generate reports for every Rubin-query target; set `"visibility_selected"` to generate them only for targets that pass the local visibility filter on at least one requested night.
-- `visibility_target_scope="all_queried"`: evaluate every queried target on every requested night for `visibility_target_summary.csv` and nightly plots; set `"mop_daily"` to evaluate only MOP candidates returned for each night.
+- `target_data_scope="with_data"`: default analysis mode; keep only targets with MOP photometry, active-survey images, or active-source photometry. Set `"all"` to disable this extra active-source cut; MOP candidates with no event parameters and no photometry remain diagnostic-only.
+- `visibility_target_scope="all_queried"`: choose the candidate pool for nightly visibility: every queried target on every requested night; set `"mop_daily"` to use only MOP candidates returned for each night. Both scopes are subsequently filtered by the local visibility cuts, so a separate `"visibility_only"` scope would be redundant.
 - `previously_observed_providers=("HSH", "JS")`: choose which registered local surveys contribute previously observed targets; use a subset such as `("HSH",)`.
 - `additional_targets=...`: add a pandas DataFrame or CSV path with `Target`, `RA_deg`, and `Dec_deg`; these targets join the Rubin query and, by default, nightly visibility evaluation.
 - `sky_marker_encoding="split_color"`: encode magnitude and visits with two colored marker halves and two color bars.
@@ -115,6 +121,12 @@ combined, paths = run_target_selection(
 
 For tests or advanced configurations, explicitly pass `mop`, `tap_service`, `butler`, or a custom `target_plotter`.
 
+### Coordinate provenance and precision
+
+MOP event-page coordinates are authoritative. The pipeline preserves the original sexagesimal values in `mop_ra` and `mop_dec`, stores their full floating-point ICRS conversion in `mop_ra_deg` and `mop_dec_deg`, and copies those values without rounding into the canonical `RA_deg` and `Dec_deg` used by visibility, TAP, Butler, and photometry calculations. `coordinate_source`, `coordinate_priority`, `coordinate_offset_arcsec`, and `coordinate_was_overridden` make coordinate replacement auditable in the run tables.
+
+HSH `CRVAL1`/`CRVAL2` values are image WCS reference points, not event coordinates. They are retained only as `pointing_ra_deg` and `pointing_dec_deg` observation metadata and can never replace a MOP position. Caches and report versions include coordinates, so upgrading to this release automatically invalidates products calculated at a different position. Coordinate-copy notebook cells display three decimal places in sexagesimal notation; calculations always use the unrounded numeric values.
+
 ### Partial-night allocations
 
 Use `visibility_observing_windows` when only part of a night is assigned. The ISO date identifies the **evening on which the night begins**; times before noon belong to the following calendar day in the observatory's local timezone. The configuration is evaluated once per night and its mask is reused for every target.
@@ -141,10 +153,12 @@ When only the schedule changes, set `OVERWRITE_VISIBILITY_PLOTS=True` while leav
 
 The automatic visibility plots contain only targets passing the configurable altitude and observable-time criteria. To make plots from a manually reviewed final selection without applying another filter:
 
+When more than 20 targets pass on one night, the automatic and manually selected nightly plots are split into numbered PNGs with at most 20 targets each. They are grouped first as `MOP-only`, then `HSH/JS-observed`, so the output names and titles make the source clear. If two source groups must appear in a single plot, MOP-only curves are solid and HSH/JS-observed curves are dashed; these styles are explained in the legend. Pass `max_targets_per_plot=...` to either save function to change the limit.
+
 ```python
 from visibility_plotter import (
     plot_selected_visibility,
-    plot_visibility_sequence,
+    compile_visibility_plot_pages,
     save_selected_visibility_plots,
 )
 
@@ -157,17 +171,14 @@ save_selected_visibility_plots(
     observing_windows=allocated_time,
 )
 
-# Stack all selected nights chronologically; the extension chooses PDF or PNG.
-plot_visibility_sequence(
-    selected_for_all_nights,
+# Compile the already-generated nightly PNGs, preserving source-aware parts.
+compile_visibility_plot_pages(
+    "final_visibility_plots",
     "visibility_sequence.pdf",
-    minimum_observable_minutes=90,
-    x_reference_every=4,
-    observing_windows=allocated_time,
 )
 ```
 
-For explicit selection outside the pipeline, use `select_nightly_targets(...)`. Set `return_all=True` to retain rejected targets and their reasons. `plot_visibility_sequence(...)` starts at the first evening civil twilight (and extends through dawn or a later assigned interval), orders panels chronologically, repeats time labels every `x_reference_every` nights, and writes PDF by default when no extension is supplied. The twilight shading therefore includes both evening and dawn transitions.
+For explicit selection outside the pipeline, use `select_nightly_targets(...)`. Set `return_all=True` to retain rejected targets and their reasons. `compile_visibility_plot_pages(...)` creates one PDF page per observing date from the existing nightly PNGs. It preserves every source-aware part and adds a date box to each page.
 
 ## Outputs
 
@@ -184,6 +195,7 @@ outputs/
     ├── tables/
     │   ├── visible_targets_daily.csv   # Visibility by date
     │   ├── visible_summary.csv         # Visibility + MOP parameters
+    │   ├── mop_candidates_without_data.csv # MOP-visible candidates excluded for missing event data
     │   ├── visibility_target_summary.csv # Per-target local visibility pass/fail summary
     │   ├── queried_targets.csv          # Complete source-labeled Rubin query list
     │   ├── coverage_raw.csv            # Rubin visit/detector rows
@@ -199,7 +211,7 @@ outputs/
     │   └── target_summary.png          # Visual summary table
     ├── sky_plots/                      # Full-sky and bulge maps
     ├── monitoring_reports/
-    │   └── monitoring_lightcurves.pdf  # Optional MOP curves with DP2/HSH/JS epochs and t0 ± 2tE zooms
+    │   └── lightcurves.pdf  # Optional MOP curves with DP2/HSH/JS epochs and t0 ± 2tE zooms
     ├── visibility_plots/               # Automatically filtered nightly plots
     │   └── visibility_selection.csv    # Metrics, decisions, and rejection reasons
     └── targets/

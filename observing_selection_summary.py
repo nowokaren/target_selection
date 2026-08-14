@@ -10,6 +10,8 @@ from matplotlib.patches import Rectangle
 import numpy as np
 import pandas as pd
 
+from target_region import classify_target_region
+
 from observatory_observations import (
     _numeric_parameter,
     assign_microlensing_stage,
@@ -26,6 +28,29 @@ STAGES = (
     ("post_baseline", "Post-baseline", "τ > 2"),
 )
 
+
+
+def _visibility_pass_mask(values: pd.Series) -> pd.Series:
+    """Coerce visibility flags safely after CSV cache round-trips."""
+    if values.dtype == bool:
+        return values.fillna(False)
+    return values.map(
+        lambda value: str(value).strip().casefold() in {"1", "true", "yes", "y"}
+        if pd.notna(value) else False
+    )
+
+
+def _has_current_mop_data(data: pd.DataFrame) -> pd.Series:
+    """Identify rows with a current MOP magnitude or physical event parameter."""
+    magnitude = pd.to_numeric(data.get("mag_now"), errors="coerce")
+    parameter_columns = [
+        column for column in ("t_E_days", "t_0_HJD", "u_0") if column in data
+    ]
+    parameters = (
+        data[parameter_columns].apply(pd.to_numeric, errors="coerce").notna().any(axis=1)
+        if parameter_columns else pd.Series(False, index=data.index)
+    )
+    return magnitude.gt(0) | parameters
 
 def _safe_target_name(value: object) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value)).strip("._") or "unknown_target"
@@ -47,6 +72,76 @@ def _stage_rows(
         event_half_width_t_e=event_half_width_t_e,
     )
     return classified
+
+
+
+
+def _abbreviate_filter_name(value: object, *, maximum_length: int = 12) -> str:
+    """Return a compact, unambiguous-enough label for a photometric filter."""
+    text = "" if pd.isna(value) else str(value).strip()
+    if not text:
+        return "—"
+    normalized = re.sub(r"[ _-]+", "_", text).strip("_").upper()
+    aliases = {
+        "OGLE_I": "I", "GAIA_G": "G", "ZTF_G": "g", "ZTF_R": "r",
+        "ZTF_I": "i", "MOA_RED": "MOA-R", "MOA_BLUE": "MOA-B",
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    if normalized.endswith("_I"):
+        return "I"
+    if normalized.endswith("_V"):
+        return "V"
+    if normalized.endswith("_G"):
+        return "G"
+    if len(text) <= maximum_length:
+        return text
+    return f"{text[:maximum_length - 1]}…"
+
+def _last_mop_magnitudes(
+    targets: pd.DataFrame, photometry_dir: str | Path
+) -> pd.DataFrame:
+    """Return one preferred recent MOP magnitude and its compact filter per target.
+
+    ``OGLE_I`` is preferred, followed by ``G``. When neither exists, the most
+    recently observed valid point in any filter is used instead.
+    """
+    records: list[dict[str, object]] = []
+    photometry_dir = Path(photometry_dir)
+    for target in targets["Target"].astype(str).drop_duplicates():
+        path = photometry_dir / f"{_safe_target_name(target)}.csv"
+        if not path.exists():
+            continue
+        try:
+            data = pd.read_csv(path)
+        except OSError:
+            continue
+        required = {"Timestamp", "Magnitude"}
+        if not required.issubset(data.columns):
+            continue
+        data = data.copy()
+        data["Timestamp"] = pd.to_datetime(data["Timestamp"], errors="coerce", utc=True)
+        data["Magnitude"] = pd.to_numeric(data["Magnitude"], errors="coerce")
+        data = data.dropna(subset=["Timestamp", "Magnitude"])
+        if data.empty:
+            continue
+        filters = data.get("Filter", pd.Series("", index=data.index)).fillna("").astype(str)
+        normalized_filters = filters.str.strip().str.casefold().str.replace(" ", "_", regex=False)
+        preferred = pd.Series(False, index=data.index)
+        for filter_name in ("ogle_i", "g"):
+            matches = normalized_filters.eq(filter_name)
+            if matches.any():
+                preferred = matches
+                break
+        selected = data.loc[preferred] if preferred.any() else data
+        row = selected.sort_values("Timestamp").iloc[-1]
+        filter_label = _abbreviate_filter_name(row.get("Filter", ""))
+        records.append({
+            "Target": target,
+            "last_mag": float(row["Magnitude"]),
+            "last_mag_filter": filter_label,
+        })
+    return pd.DataFrame(records, columns=["Target", "last_mag", "last_mag_filter"])
 
 
 def _mop_stage_counts(
@@ -157,6 +252,7 @@ def build_observing_selection_summary(
     release_visit_exptime_s: float | None = 30.0,
     peak_half_width_t_e: float = 0.3,
     event_half_width_t_e: float = 2.0,
+    include_reference: bool = True,
 ) -> pd.DataFrame:
     """Build a bright-to-faint table for targets passing the local visibility filter.
 
@@ -169,7 +265,7 @@ def build_observing_selection_summary(
     missing = required - set(targets.columns)
     if missing:
         raise ValueError(f"Targets are missing columns: {sorted(missing)}")
-    passes_visibility = targets["passes_visibility_filter"].fillna(False).astype(bool)
+    passes_visibility = _visibility_pass_mask(targets["passes_visibility_filter"])
     # Keep the table consistent with the observing-selection criterion: a
     # target must pass the configured altitude/time cut (40 deg and 90 min by
     # default).  HSH observations are reported only for those selected rows.
@@ -204,22 +300,33 @@ def build_observing_selection_summary(
     selected["t_0_HJD"] = _numeric_parameter(selected.get("mop_t_0_hjd", pd.Series(np.nan, index=selected.index)))
     selected["u_0"] = _numeric_parameter(selected.get("mop_u_0", pd.Series(np.nan, index=selected.index)))
     selected["stage_classification_available"] = selected["t_E_days"].gt(0) & selected["t_0_HJD"].notna()
+    selected["has_current_mop_data"] = _has_current_mop_data(selected)
+    selected["target_region"] = selected["Target"].map(classify_target_region)
 
     summaries = [
         _mop_stage_counts(selected, mop_photometry_dir, peak_half_width_t_e=peak_half_width_t_e, event_half_width_t_e=event_half_width_t_e),
         _hsh_stage_hours(selected, hsh_image_catalog, peak_half_width_t_e=peak_half_width_t_e, event_half_width_t_e=event_half_width_t_e),
-        _release_stage_hours(selected, coverage_rows, visit_exptime_s=release_visit_exptime_s, peak_half_width_t_e=peak_half_width_t_e, event_half_width_t_e=event_half_width_t_e),
     ]
+    if include_reference:
+        summaries.append(_release_stage_hours(
+            selected, coverage_rows, visit_exptime_s=release_visit_exptime_s,
+            peak_half_width_t_e=peak_half_width_t_e, event_half_width_t_e=event_half_width_t_e,
+        ))
+    last_magnitudes = _last_mop_magnitudes(selected, mop_photometry_dir)
     result = selected[[
-        "Target", "mag_now", "visible_hours", "best_observation_date", "visible_from", "visible_to",
-        "stage_classification_available", "t_E_days", "t_0_HJD", "u_0",
+        "Target", "target_region", "mag_now", "visible_hours", "best_observation_date", "visible_from", "visible_to",
+        "stage_classification_available", "has_current_mop_data", "t_E_days", "t_0_HJD", "u_0",
     ]].copy()
+    result = result.merge(last_magnitudes, on="Target", how="left")
     for summary in summaries:
         result = result.merge(summary, on="Target", how="left")
+    stage_providers = [("mop", "points"), ("hsh", "hours")]
+    if include_reference:
+        stage_providers.append(("release", "hours"))
     stage_columns = [
         f"{provider}_{stage}_{measure}"
         for stage, _, _ in STAGES
-        for provider, measure in (("mop", "points"), ("hsh", "hours"), ("release", "hours"))
+        for provider, measure in stage_providers
     ]
     for column in stage_columns:
         result[column] = pd.to_numeric(result.get(column), errors="coerce").fillna(0)
@@ -231,10 +338,11 @@ def save_observing_selection_summary(
     csv_path: str | Path,
     png_path: str | Path,
     *,
-    release_name: str,
+    release_name: str | None,
     release_visit_exptime_s: float | None = 30.0,
     peak_half_width_t_e: float = 0.3,
     event_half_width_t_e: float = 2.0,
+    include_reference: bool = True,
 ) -> None:
     """Write the observing-planning CSV and a grouped, compact PNG table."""
     csv_path, png_path = Path(csv_path), Path(png_path)
@@ -250,22 +358,24 @@ def save_observing_selection_summary(
 
     # Scheduling columns are kept together at the far right so the event
     # measurements remain the visual focus of the table.
-    columns = ["Target", "mag_now", "visible_hours"]
-    labels = ["Target", "mag now", "Visible [h]"]
+    columns = ["Target", "target_region", "mag_now", "last_mag", "last_mag_filter", "visible_hours"]
+    labels = ["Target", "Region", "mag now", "Last mag", "Last filter", "Visible [h]"]
     top_groups = ["" for _ in columns]
     stage_headers = ["" for _ in columns]
     survey_headers = list(labels)
     stage_ranges: list[tuple[int, int, str]] = []
     for stage, title, criterion in STAGES:
         start_column = len(columns)
-        stage_columns = [
-            f"mop_{stage}_points", f"hsh_{stage}_hours", f"release_{stage}_hours",
-        ]
+        stage_columns = [f"mop_{stage}_points", f"hsh_{stage}_hours"]
+        headers = ["MOP [N points]", "HSH [h]"]
+        if include_reference:
+            stage_columns.append(f"release_{stage}_hours")
+            headers.append(f"{release_name} [h]")
         columns.extend(stage_columns)
-        survey_headers.extend(["MOP [N points]", "HSH [h]", f"{release_name} [h]"])
-        stage_headers.extend([f"{title} ({criterion})"] * 3)
-        top_groups.extend(["", "", ""])
-        stage_ranges.append((start_column, start_column + 3, f"{title} ({criterion})"))
+        survey_headers.extend(headers)
+        stage_headers.extend([f"{title} ({criterion})"] * len(stage_columns))
+        top_groups.extend([""] * len(stage_columns))
+        stage_ranges.append((start_column, start_column + len(stage_columns), f"{title} ({criterion})"))
     parameter_start = len(columns)
     columns.extend(["t_E_days", "t_0_HJD", "u_0"])
     survey_headers.extend(["t_E [days]", "t_0 [date]", "u_0"])
@@ -277,7 +387,7 @@ def save_observing_selection_summary(
     stage_headers.extend(["", "", ""])
     top_groups.extend(["", "", ""])
     stage_start = stage_ranges[0][0]
-    top_groups[stage_start + 7] = "Microlensing event stage"
+    top_groups[stage_start + (parameter_start - stage_start) // 2] = "Microlensing event stage"
     top_groups[parameter_start + 1] = "Microlensing parameters"
     display = summary[columns].copy()
 
@@ -285,7 +395,7 @@ def save_observing_selection_summary(
         numeric = pd.to_numeric(display[column], errors="coerce")
         if column.startswith("mop_"):
             display[column] = numeric.map(lambda value: "—" if pd.isna(value) else str(int(value)))
-        elif column.startswith(("hsh_", "release_")) or column in {"mag_now", "visible_hours", "t_E_days", "t_0_HJD", "u_0"}:
+        elif column.startswith(("hsh_", "release_")) or column in {"mag_now", "last_mag", "visible_hours", "t_E_days", "t_0_HJD", "u_0"}:
             display[column] = numeric.map(lambda value: "—" if pd.isna(value) else f"{value:.1f}")
     unavailable = ~summary["stage_classification_available"].astype(bool)
     stage_indices = [index for index, column in enumerate(columns) if column.startswith(("mop_", "hsh_", "release_"))]
@@ -318,7 +428,7 @@ def save_observing_selection_summary(
     ]
 
     # Widths are derived from the longest displayed value in each column. The
-    # stage criteria are merged across their three survey columns, so the
+    # Stage criteria are merged across the available survey columns, so the
     # individual widths only need to accommodate the survey name and values.
     width_units = []
     for index, column in enumerate(columns):
@@ -330,11 +440,15 @@ def save_observing_selection_summary(
     fig = plt.figure(figsize=(max(11, min(20, sum(width_units) * .045)), max(5.0, 1.35 + .27 * (len(display) + 3))))
     ax = fig.add_axes([.008, .025, .984, .91])
     ax.axis("off")
-    fig.suptitle(f"Observing selection summary — {release_name}", y=.985, fontsize=15, fontweight="bold")
-    exposure_note = (
-        f"MOP: point count. HSH: total WCS-image exposure time. {release_name}: unique visits × {release_visit_exptime_s:g} s nominal exposure."
-        if release_visit_exptime_s else f"MOP: point count. HSH: total WCS-image exposure time. {release_name}: visit duration unavailable."
-    )
+    title = "Observing selection summary" + (f" — {release_name}" if include_reference and release_name else "")
+    fig.suptitle(title, y=.985, fontsize=15, fontweight="bold")
+    if include_reference:
+        exposure_note = (
+            f"MOP: point count. HSH: total WCS-image exposure time. {release_name}: unique visits × {release_visit_exptime_s:g} s nominal exposure."
+            if release_visit_exptime_s else f"MOP: point count. HSH: total WCS-image exposure time. {release_name}: visit duration unavailable."
+        )
+    else:
+        exposure_note = "MOP: point count. HSH: total WCS-image exposure time."
     fig.text(.5, .955, "Rows pass the local visibility filter; sorted by current MOP magnitude. " + exposure_note,
              ha="center", va="top", fontsize=8.3)
     table = ax.table(
@@ -372,47 +486,6 @@ def save_observing_selection_summary(
         merged_rectangle(1, start_column, end_column, header, "#c9dfef", 6.2)
     merged_rectangle(0, parameter_start, len(columns), "Microlensing parameters", "#b5cddd", 7.0)
 
-    # Black out stages that are still in the future relative to the current
-    # event phase.  This avoids implying that a post-peak stage has already
-    # been sampled when the event is currently rising or near its peak.
-    now_mjd = (pd.Timestamp.now(tz="UTC") - pd.Timestamp("1858-11-17", tz="UTC")) / pd.Timedelta(days=1)
-    stage_order = [stage for stage, _, _ in STAGES]
-    for row_index, (_, row_data) in enumerate(summary.iterrows(), start=3):
-        t0 = pd.to_numeric(row_data.get("t_0_HJD"), errors="coerce")
-        te = pd.to_numeric(row_data.get("t_E_days"), errors="coerce")
-        if pd.isna(t0) or pd.isna(te) or te <= 0:
-            continue
-        tau = (float(now_mjd) + 2400000.5 - float(t0)) / float(te)
-        if tau < -event_half_width_t_e:
-            current_stage = "pre_baseline"
-        elif tau < -peak_half_width_t_e:
-            current_stage = "rise"
-        elif abs(tau) <= peak_half_width_t_e:
-            current_stage = "peak"
-        elif tau <= event_half_width_t_e:
-            current_stage = "fall"
-        else:
-            current_stage = "post_baseline"
-        current_index = stage_order.index(current_stage)
-        for stage_index in range(current_index + 1, len(stage_order)):
-            start = stage_start + stage_index * 3
-            for column_index in range(start, start + 3):
-                cell = table[(row_index, column_index)]
-                cell.set_facecolor("black")
-                cell.get_text().set_color("black")
-        # A completed stage with zero observations is meaningful: it was
-        # already observable for the event, but this provider has no points.
-        # Use a light gray cell instead of leaving a misleading white zero.
-        if current_index > 0:
-            for stage_index in range(current_index):
-                start = stage_start + stage_index * 3
-                for provider_offset, provider in enumerate(("mop", "hsh", "release")):
-                    value = pd.to_numeric(row_data.get(f"{provider}_{stage_order[stage_index]}_{'points' if provider == 'mop' else 'hours'}"), errors="coerce")
-                    if pd.notna(value) and float(value) == 0.0:
-                        cell = table[(row_index, start + provider_offset)]
-                        cell.set_facecolor("#d9d9d9")
-                        cell.get_text().set_color("#666666")
-
     for (row, column), cell in table.get_celld().items():
         cell.PAD = .013
         if row == 0:
@@ -432,15 +505,67 @@ def save_observing_selection_summary(
     # Emphasize positive HSH exposure values so previously observed stages
     # can be found immediately among the provider columns.
     for row_index, (_, row_data) in enumerate(summary.iterrows(), start=3):
-        for stage_index, (stage, _, _) in enumerate(STAGES):
+        for stage, _, _ in STAGES:
             value = pd.to_numeric(row_data.get(f"hsh_{stage}_hours"), errors="coerce")
             if pd.notna(value) and float(value) > 0:
-                table[(row_index, stage_start + stage_index * 3 + 1)].set_text_props(
+                hsh_column = columns.index(f"hsh_{stage}_hours")
+                table[(row_index, hsh_column)].set_text_props(
                     weight="bold", color="black"
                 )
 
-    first_stage = columns.index("mop_pre_baseline_points")
-    divider = float(sum(widths[:first_stage]))
-    ax.plot([divider, divider], [0, 1], transform=ax.transAxes, color="#5f7890", linewidth=1.1, zorder=5)
+    # Black is reserved exclusively for stages that have not yet occurred.
+    # Apply this after alternate-row shading so it is consistent for every row.
+    now_mjd = (pd.Timestamp.now(tz="UTC") - pd.Timestamp("1858-11-17", tz="UTC")) / pd.Timedelta(days=1)
+    stage_order = [stage for stage, _, _ in STAGES]
+    for row_index, (_, row_data) in enumerate(summary.iterrows(), start=3):
+        if not bool(row_data.get("stage_classification_available", False)):
+            continue
+        t0 = pd.to_numeric(row_data.get("t_0_HJD"), errors="coerce")
+        te = pd.to_numeric(row_data.get("t_E_days"), errors="coerce")
+        if pd.isna(t0) or pd.isna(te) or te <= 0:
+            continue
+        tau = (float(now_mjd) + 2400000.5 - float(t0)) / float(te)
+        if tau < -event_half_width_t_e:
+            current_index = 0
+        elif tau < -peak_half_width_t_e:
+            current_index = 1
+        elif abs(tau) <= peak_half_width_t_e:
+            current_index = 2
+        elif tau <= event_half_width_t_e:
+            current_index = 3
+        else:
+            current_index = 4
+        for stage_index in range(current_index + 1, len(STAGES)):
+            start, end, _ = stage_ranges[stage_index]
+            for column_index in range(start, end):
+                cell = table[(row_index, column_index)]
+                cell.set_facecolor("black")
+                cell.get_text().set_color("black")
+        # A zero in a completed stage means that the stage occurred but that
+        # particular provider has no data. It is distinct from a future stage.
+        for stage_index in range(current_index):
+            start, end, _ = stage_ranges[stage_index]
+            for column_index, column_name in enumerate(columns[start:end], start):
+                value = pd.to_numeric(row_data.get(column_name), errors="coerce")
+                if pd.notna(value) and float(value) == 0.0:
+                    cell = table[(row_index, column_index)]
+                    cell.set_facecolor("#d9d9d9")
+                    cell.get_text().set_color("#666666")
+
+    # A dim target label indicates that neither a usable current MOP magnitude
+    # nor a physical MOP event parameter is available for that target.
+    faded_columns = [columns.index(name) for name in ("Target", "mag_now", "last_mag", "last_mag_filter", "t_E_days", "t_0_HJD", "u_0")]
+    for row_index, (_, row_data) in enumerate(summary.iterrows(), start=3):
+        if not bool(row_data.get("has_current_mop_data", False)):
+            for column_index in faded_columns:
+                table[(row_index, column_index)].get_text().set_color("#8a8a8a")
+
+    stage_dividers = [start for start, _, _ in stage_ranges]
+    for start_column in stage_dividers:
+        divider = float(sum(widths[:start_column]))
+        ax.plot(
+            [divider, divider], [0, 1], transform=ax.transAxes,
+            color="#38566f", linewidth=1.45, zorder=5,
+        )
     fig.savefig(png_path, dpi=180, bbox_inches="tight", pad_inches=.08)
     plt.close(fig)

@@ -221,7 +221,11 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
         ax_lc.set(xlabel="Date", ylabel="Magnitude", title=title)
         start_number = mdates.date2num(lightcurve_start.to_datetime64())
         _, current_right = ax_lc.get_xlim()
-        ax_lc.set_xlim(start_number, max(current_right, start_number + 30))
+        created_at = pd.Timestamp.now(tz="UTC").tz_convert(None)
+        future_horizon = mdates.date2num(
+            (created_at + pd.DateOffset(months=2)).to_datetime64()
+        )
+        ax_lc.set_xlim(start_number, max(current_right, start_number + 30, future_horizon))
         if has_release_data:
             valid_release_points = int(pd.to_numeric(
                 release_photometry.get("magnitude"), errors="coerce",
