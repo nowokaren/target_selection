@@ -1,5 +1,7 @@
 # Configuration
 
+Date-based observing plans use `configs/example.toml`. Large coordinate catalogs use the separate `configs/lastberu_dp2.toml`; see [Large reference-catalog enrichment](reference-catalog.md).
+
 The TOML file is ordered by how often settings normally change. Dates, active
 sources, scientific cuts, and product switches are at the top. Source
 definitions, cache policy, and implementation details are below them.

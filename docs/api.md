@@ -48,6 +48,29 @@ target-selection run --config configs/my_run.toml
 
 The CLI and notebook call the same Python workflow and use the same TOML file.
 
+## Large coordinate catalogs
+
+```python
+from target_selection import (
+    load_reference_catalog_config, run_reference_catalog,
+    run_reference_catalog_preview,
+)
+
+config = load_reference_catalog_config("configs/lastberu_dp2.toml")
+# Small validation run; the full run omits n_targets.
+result = run_reference_catalog_preview(config, n_targets=200)
+# Full run: result = run_reference_catalog(config)
+display(result.catalog.head())
+```
+
+The equivalent CLI command is:
+
+```bash
+target-selection catalog --config configs/lastberu_dp2.toml
+```
+
+`ReferenceCatalogResult` exposes `catalog`, `catalog_path`, `cutout_plan_path`, `manifest_path`, `output_dir`, and the aggregate `summary`. TAP and Butler clients can be supplied explicitly for tests or non-default RSP environments.
+
 ## Advanced low-level API
 
 `target_selection_pipeline.run_target_selection` remains available for an

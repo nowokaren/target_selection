@@ -12,6 +12,14 @@ target-selection list-sources
 target-selection run --config configs/example.toml
 ```
 
+For large coordinate catalogs that do not require dates or local visibility, use the dedicated enrichment workflow:
+
+```bash
+target-selection catalog --config configs/lastberu_dp2.toml
+```
+
+It performs chunked uploaded-table TAP cross-matches, samples Rubin coadd property maps, and generates a resource-limited set of prioritized 20-arcsec cutout grids. See `docs/reference-catalog.md` and `notebooks/lastberu_reference_catalog.ipynb`.
+
 The same configuration is used from Python or the notebook:
 
 ```python

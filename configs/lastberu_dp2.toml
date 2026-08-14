@@ -1,0 +1,57 @@
+# Large-catalog enrichment is independent of observing dates and local
+# visibility planning. Run it with:
+#   target-selection catalog --config configs/lastberu_dp2.toml
+
+[catalog]
+# A short label used as the output-directory name.
+name = "lastberu_dp2"
+
+# Input and output locations. The 35k-row catalog is intentionally kept out of
+# Git; change input_path when the local file is stored elsewhere.
+input_path = "LaStBeRu_data/LaStBeRu_watchlist_LSST_grades.csv"
+output_dir = "outputs/catalog_enrichment"
+cache_dir = "outputs/_cache/reference_catalog"
+
+# Rubin Data Preview/Data Release profile and input-column mapping.
+data_release = "DP2"
+target_id_column = "object_id"
+ra_column = "ra"
+dec_column = "dec"
+extra_info_column = "extra_info"
+
+# Bands and coadd survey-property maps to sample at every target position.
+# Available map keys: maglim, psf_size, exposure_time, sky_noise,
+# sky_background, epoch_min, epoch_max.
+bands = ["u", "g", "r", "i", "z", "y"]
+property_maps = ["maglim", "psf_size", "exposure_time", "sky_noise"]
+coadd_skymap = "lsst_cells_v2"
+coadd_pixel_scale_arcsec = 0.2
+
+# VisitDetector rows are retrieved by occupied HEALPix tiles and matched to detector polygons locally.
+# A failed/interrupted run can resume from cached tiles. Omit target_limit for all rows;
+# set it to a small positive integer only for a trial run.
+partial_property_map_reads = true
+visit_query_scope = "coadd" # "coadd" skips positions without a coadd; "all" queries every target.
+tap_tile_nside = 64
+tap_max_workers = 2
+detector_search_radius_deg = 0.35
+tap_timeout_seconds = 7200
+# target_limit = 200
+reuse_cache = true
+
+# One PNG contains a 20-arcsec square panel for every requested coadd band.
+# Targets must have a coadd and one of cutout_grades. Grade order is strict;
+# image-quality score orders targets within each grade.
+generate_cutouts = true
+max_cutouts = 100
+cutout_size_arcsec = 20.0
+cutout_grades = ["A", "B"]
+cutout_bands = ["u", "g", "r", "i", "z", "y"]
+verbose = true
+
+# The quality score is a transparent prioritization heuristic, not a physical
+# classification. Weights are normalized automatically.
+[quality_weights]
+depth = 0.50
+seeing = 0.35
+band_coverage = 0.15

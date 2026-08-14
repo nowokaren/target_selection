@@ -16,6 +16,7 @@ that exist and gives a short description and relative path for each one.
 | Sky maps | No | Optional | `sky_maps = true` |
 | Individual coadd dashboard PNGs | No | Optional | `target_reports = true` |
 | Reference forced photometry | No | Optional | `reference_photometry = true` |
+| Large coordinate-catalog enrichment | Separate workflow | Separate workflow | `target-selection catalog` |
 
 Planning-only mode intentionally avoids TAP and Butler. It is the fastest way
 to evaluate local visibility, produce the MOP/follow-up observing-selection table,
