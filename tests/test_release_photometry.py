@@ -144,3 +144,36 @@ def test_dp2_dia_catalog_rows_are_converted_to_plot_magnitudes():
     assert result.loc[0, "measurement_method"] == "dia_forced_catalog"
     assert result.loc[0, "band"] == "i"
     assert round(result.loc[0, "magnitude"], 1) == 26.4
+
+
+def test_dp2_dia_catalog_match_preserves_large_object_ids(monkeypatch):
+    """A mixed RA/Dec row must not round a 64-bit DiaObject identifier."""
+    from data_release_config import get_data_release
+    import release_photometry
+
+    large_id = 763948238121205967
+    calls = []
+
+    def fake_tap_to_frame(_service, query):
+        calls.append(query)
+        if "FROM dp2.DiaObject" in query:
+            return pd.DataFrame({
+                "diaObjectId": [large_id], "ra": [10.0], "dec": [-20.0],
+            })
+        assert str(large_id) in query
+        return pd.DataFrame({
+            "diaObjectId": [large_id], "visitId": [100], "detector": [5],
+            "band": ["i"], "direct_flux_njy": [100.0],
+            "direct_flux_err_njy": [10.0], "direct_flux_flag": [False],
+            "difference_flux_njy": [3.0],
+            "difference_flux_err_njy": [2.0], "difference_flux_flag": [False],
+            "expMidptMJD": [60000.0],
+        })
+
+    monkeypatch.setattr(release_photometry, "_tap_to_frame", fake_tap_to_frame)
+    result = query_dia_forced_photometry(
+        _targets().iloc[:1], tap_service=object(),
+        data_release=get_data_release("DP2"), max_workers=1, verbose=False,
+    )
+    assert result.loc[0, "diaObjectId"] == large_id
+    assert len(calls) == 2

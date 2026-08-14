@@ -75,6 +75,11 @@ capabilities = ["targets", "observations", "photometry"]
 provider_name = "JS"
 inventory_path = "js_data/observations.csv"
 enabled = false
+# Optional source-local maps for nonstandard input headers. Maps are
+# input_column = "canonical_column"; omit them when the CSV already uses
+# standard names or recognized aliases.
+# inventory_column_map = { event_id = "Target", obs_mjd = "mjd", passband = "band", exposure_sec = "exptime_s" }
+# photometry_column_map = { event_id = "Target", utc_time = "Timestamp", passband = "band", mag_cal = "magnitude", mag_err = "magnitude_error" }
 
 [reference_surveys.rubin_dp2]
 adapter = "rubin"

@@ -18,6 +18,7 @@ nav:
   - Configuration: configuration.md
   - Data and cache: data-and-cache.md
   - Products: products.md
+  - Product examples: examples.md
   - Python and CLI API: api.md
   - Extending the tool:
       - Architecture: architecture.md

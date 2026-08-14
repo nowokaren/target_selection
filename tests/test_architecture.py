@@ -194,6 +194,58 @@ def test_workflow_can_run_without_a_reference_survey(tmp_path):
     assert (result.runs["planning_only"].paths["run"] / "product_index.json").exists()
 
 
+
+def test_csv_adapters_accept_configured_column_maps(tmp_path):
+    from target_selection.sources.adapters import CsvFollowupSurvey, CsvTargetProvider
+    from target_selection.sources.base import SourceContext
+
+    target_path = tmp_path / "provider_targets.csv"
+    pd.DataFrame({
+        "event_id": ["OGLE-TEST"], "longitude": [270.0], "latitude": [-30.0],
+    }).to_csv(target_path, index=False)
+    target_spec = SourceSpec(
+        "provider", "csv", options={
+            "path": str(target_path),
+            "column_map": {"event_id": "Target", "longitude": "RA_deg", "latitude": "Dec_deg"},
+        },
+    )
+    targets = CsvTargetProvider(target_spec).collect_targets(None)
+    assert targets.loc[0, ["Target", "RA_deg", "Dec_deg"]].tolist() == ["OGLE-TEST", 270.0, -30.0]
+
+    inventory = tmp_path / "followup_inventory.csv"
+    pd.DataFrame({
+        "event": ["OGLE-TEST"], "epoch_mjd": [61000.0],
+        "passband": ["I"], "seconds": [300.0],
+    }).to_csv(inventory, index=False)
+    photometry = tmp_path / "followup_photometry.csv"
+    pd.DataFrame({
+        "event": ["OGLE-TEST"], "utc_time": ["2026-08-01T02:00:00Z"],
+        "passband": ["I"], "instrumental_mag": [17.1], "sigma_mag": [0.04],
+    }).to_csv(photometry, index=False)
+    survey_spec = SourceSpec(
+        "survey", "csv", options={
+            "provider_name": "TEST",
+            "inventory_path": str(inventory),
+            "photometry_path": str(photometry),
+            "inventory_column_map": {
+                "event": "Target", "epoch_mjd": "mjd", "passband": "band", "seconds": "exptime_s",
+            },
+            "photometry_column_map": {
+                "event": "Target", "utc_time": "Timestamp", "passband": "band",
+                "instrumental_mag": "magnitude", "sigma_mag": "magnitude_error",
+            },
+        },
+    )
+    config = AnalysisConfig(
+        start_date="2026-08-01", target_providers=(), followup_surveys=("survey",),
+        reference_surveys=(), followup_specs={"survey": survey_spec}, reference_specs={},
+    )
+    database = TargetRegistry(tmp_path / "targets.sqlite")
+    context = SourceContext(config, database, tmp_path)
+    assert CsvFollowupSurvey(survey_spec).import_observations(context) == 2
+    assert len(database.observation_epochs(pd.DataFrame({"Target": ["OGLE-TEST"]}), providers=("TEST",))) == 1
+    assert len(database.photometry(pd.DataFrame({"Target": ["OGLE-TEST"]}), sources=("TEST",))) == 1
+
 def test_csv_followup_adapter_imports_and_reuses_photometry(tmp_path):
     from target_selection.sources.adapters import CsvFollowupSurvey
     from target_selection.sources.base import SourceContext

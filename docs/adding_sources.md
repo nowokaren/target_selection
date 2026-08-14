@@ -52,12 +52,63 @@ endpoint = "https://example.invalid/api"
 Provider-specific settings belong in that source definition. They do not
 become global keywords.
 
-## Normalized columns
+## Normalized columns and configurable maps
 
-Target frames use `Target`, `RA_deg`, and `Dec_deg`. Observation inventories
-use `Target` and `mjd`, with optional `band`, `exptime_s`, `usable`, `RA_deg`,
-and `Dec_deg`. Photometry uses `Target`, `mjd`, optional `band`, and either
-`magnitude`/`magnitude_error` or `flux`/`flux_error`.
+All adapters translate external column names into a small internal schema.
+The rest of the workflow, database, tables, and plots use **only** these
+canonical names; a provider's native headers never propagate through the
+pipeline as requirements.
 
-Additional columns are retained as source metadata and provenance.
+| Data type | Required canonical columns | Common optional columns |
+|---|---|---|
+| Targets | `Target`, `RA_deg`, `Dec_deg` | `mag_now`, source parameters, provenance |
+| Observation inventory | `Target`, `mjd` | `band`, `exptime_s`, `usable`, `RA_deg`, `Dec_deg`, `observation_id` |
+| Photometry | `Target`, `mjd` | `band`, `magnitude`, `magnitude_error`, `flux`, `flux_error`, `point_id` |
 
+The CSV adapters recognize common aliases automatically: for example,
+`target`/`name`/`object` for `Target`, `ra`/`dec` for coordinates, `filter`
+for `band`, and `mag` for `magnitude`.
+
+When a source uses different headers, declare an exact input-to-canonical map
+inside its source definition. The map is local to that source; no global option
+or code change is needed.
+
+```toml
+[target_providers.omp_export]
+adapter = "csv"
+path = "inputs/omp_targets.csv"
+
+[target_providers.omp_export.column_map]
+event_identifier = "Target"
+ra_icrs_degrees = "RA_deg"
+dec_icrs_degrees = "Dec_deg"
+
+[followup_surveys.casleo_js]
+adapter = "csv"
+provider_name = "JS"
+inventory_path = "inputs/js_inventory.csv"
+photometry_path = "inputs/js_photometry.csv"
+
+[followup_surveys.casleo_js.inventory_column_map]
+event_identifier = "Target"
+observation_mjd = "mjd"
+filter_name = "band"
+exposure_seconds = "exptime_s"
+
+[followup_surveys.casleo_js.photometry_column_map]
+event_identifier = "Target"
+utc_timestamp = "Timestamp"
+filter_name = "band"
+calibrated_mag = "magnitude"
+calibrated_mag_error = "magnitude_error"
+```
+
+The maps have the form `input_column = "canonical_column"`. They are
+validated before import: a missing input header, an unsupported canonical name,
+or an ambiguous overwrite raises a clear error. `Timestamp` is accepted for
+photometry and is converted internally to MJD.
+
+The native HSH adapter is intentionally different: it reads the established
+HSH astrometric inventory format directly, including its `objname` convention
+and WCS-pointing metadata. Use the generic `csv` adapter for a survey whose
+schema should be supplied through `inventory_column_map`.
