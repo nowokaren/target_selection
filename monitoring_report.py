@@ -231,10 +231,12 @@ def plot_monitoring_lightcurve(
             if not valid.any():
                 continue
             yerr = np.where(np.isfinite(errors[valid]) & (errors[valid] >= 0), errors[valid], np.nan)
+            methods = release_photometry.get("measurement_method", pd.Series(dtype=str)).astype(str).str.lower()
+            method_label = "DIA" if methods.str.contains("dia").any() else "forced"
             item = ax.errorbar(
                 dates[valid], magnitudes[valid], yerr=yerr, fmt="s", ms=2.8,
                 mfc=cmap(index % 10), mec="black", mew=.3, color=cmap(index % 10),
-                alpha=.9, label=f"{data_release} DIA {band} (N={valid.sum()})", zorder=4,
+                alpha=.9, label=f"{data_release} {method_label} {band} (N={valid.sum()})", zorder=4,
             )
             handles.append(item)
             has_photometry = True
