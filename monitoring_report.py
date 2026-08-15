@@ -14,11 +14,13 @@ import numpy as np
 import pandas as pd
 
 from mop_photometry import load_event_photometry, prepare_lightcurve_data, select_lightcurve_filters
+from release_photometry import prepare_release_lightcurve_data
 
 
 DEFAULT_MONITORING_LAYERS = (
     "mop_photometry",
     "release_epochs",
+    "release_photometry",
     "hsh",
     "js",
 )
@@ -176,6 +178,7 @@ def plot_monitoring_lightcurve(
     target: pd.Series,
     photometry: pd.DataFrame,
     *,
+    release_photometry: pd.DataFrame | None = None,
     lsst_coverage: pd.DataFrame | None = None,
     observatory_epochs: pd.DataFrame | None = None,
     observatory_photometry: pd.DataFrame | None = None,
@@ -210,6 +213,31 @@ def plot_monitoring_lightcurve(
         item = ax.errorbar(dates[valid], magnitudes[valid], yerr=yerr, fmt=".", ms=2.7, alpha=.8, label=f"MOP {filter_name}", zorder=3)
         handles.append(item)
         has_photometry = True
+
+    # Optional published Rubin DIA/forced-source light curves. These are
+    # distinct from VisitDetector coverage: a visit may exist without a valid
+    # DIA photometric point.
+    if "release_photometry" in selected_layers and release_photometry is not None and not release_photometry.empty:
+        release_bands = sorted(str(band) for band in release_photometry.get("band", pd.Series(dtype=str)).dropna().unique())
+        cmap = plt.get_cmap("tab10")
+        for index, band in enumerate(release_bands):
+            data = prepare_release_lightcurve_data(release_photometry, band)
+            if data.empty:
+                continue
+            dates = mdates.date2num(data["Timestamp"].to_numpy(dtype="datetime64[us]"))
+            magnitudes = data["Magnitude"].to_numpy(float)
+            errors = data["Error"].to_numpy(float)
+            valid = np.isfinite(dates) & np.isfinite(magnitudes)
+            if not valid.any():
+                continue
+            yerr = np.where(np.isfinite(errors[valid]) & (errors[valid] >= 0), errors[valid], np.nan)
+            item = ax.errorbar(
+                dates[valid], magnitudes[valid], yerr=yerr, fmt="s", ms=2.8,
+                mfc=cmap(index % 10), mec="black", mew=.3, color=cmap(index % 10),
+                alpha=.9, label=f"{data_release} DIA {band} (N={valid.sum()})", zorder=4,
+            )
+            handles.append(item)
+            has_photometry = True
 
     coverage_layers: list[dict] = []
     if (
@@ -294,6 +322,7 @@ def create_monitoring_report(
     *,
     mop,
     mop_photometry_dir: str | Path,
+    release_photometry: pd.DataFrame | None = None,
     lsst_coverage: pd.DataFrame | None = None,
     observatory_epochs: pd.DataFrame | None = None,
     observatory_photometry: pd.DataFrame | None = None,
@@ -328,6 +357,10 @@ def create_monitoring_report(
         {name: group for name, group in observatory_photometry.groupby("Target", sort=False)}
         if observatory_photometry is not None and not observatory_photometry.empty and "Target" in observatory_photometry else {}
     )
+    release_photometry_groups = (
+        {name: group for name, group in release_photometry.groupby("Target", sort=False)}
+        if release_photometry is not None and not release_photometry.empty and "Target" in release_photometry else {}
+    )
     loader = photometry_loader or (
         lambda target: load_event_photometry(target, mop=mop, cache_dir=mop_photometry_dir)
     )
@@ -345,6 +378,7 @@ def create_monitoring_report(
                 main_axis = fig.add_subplot(grid[row_index, 0])
                 zoom_axis = fig.add_subplot(grid[row_index, 1])
                 plot_kwargs = {
+                    "release_photometry": release_photometry_groups.get(name),
                     "lsst_coverage": coverage_groups.get(name),
                     "observatory_epochs": epoch_groups.get(name),
                     "observatory_photometry": photometry_groups.get(name),

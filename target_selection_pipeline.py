@@ -444,6 +444,13 @@ def save_target_summary(
         band = column.removeprefix("coverage_n_visits_")
         result[f"n_visits_{band}"] = pd.to_numeric(targets[column], errors="coerce").fillna(0).astype(int)
 
+    curve_columns = sorted(
+        column for column in targets.columns if column.startswith("release_curve_points_")
+    )
+    for column in curve_columns:
+        label = column.removeprefix("release_curve_points_")
+        result[f"curve_points_{label}"] = pd.to_numeric(targets[column], errors="coerce").fillna(0).astype(int)
+
     photometry_dir = Path(photometry_dir)
     def count_photometry(target_name: str) -> int:
         path = photometry_dir / f"{_safe_name(target_name)}.csv"
@@ -464,10 +471,11 @@ def save_target_summary(
 
     display_columns = [
         "Target", "target_region", "priority", "release_n_visits", *[f"n_visits_{c.removeprefix('coverage_n_visits_')}" for c in band_columns],
-        "mop_photometry_points", "release_forced_photometry_points", "t_E_days", "t_0_HJD", "u_0", "mag_now", "min_airmass", "visible_nights",
+        "mop_photometry_points", "release_forced_photometry_points", *[f"curve_points_{c.removeprefix('release_curve_points_')}" for c in curve_columns],
+        "t_E_days", "t_0_HJD", "u_0", "mag_now", "min_airmass", "visible_nights",
     ]
     display = result[display_columns].copy()
-    integer_columns = {"release_n_visits", "mop_photometry_points", "release_forced_photometry_points", "visible_nights", *[c for c in display if c.startswith("n_visits_")]}
+    integer_columns = {"release_n_visits", "mop_photometry_points", "release_forced_photometry_points", "visible_nights", *[c for c in display if c.startswith("n_visits_")], *[c for c in display if c.startswith("curve_points_")]}
     parameter_columns = {"t_E_days", "t_0_HJD", "u_0"}
 
     def format_cell(value, column):
@@ -499,6 +507,10 @@ def save_target_summary(
         column: column.removeprefix("n_visits_")
         for column in display.columns if column.startswith("n_visits_")
     })
+    header_labels.update({
+        column: column.removeprefix("curve_points_")
+        for column in display.columns if column.startswith("curve_points_")
+    })
     column_headers = [header_labels.get(column, column) for column in display.columns]
     group_headers = ["" for _ in display.columns]
     visit_indices = [
@@ -509,6 +521,7 @@ def save_target_summary(
         index for index, column in enumerate(display.columns)
         if column in {
             "mop_photometry_points", "release_forced_photometry_points",
+            *[c for c in display.columns if c.startswith("curve_points_")],
             "t_E_days", "t_0_HJD", "u_0", "mag_now",
         }
     ]
@@ -1812,6 +1825,22 @@ def run_target_selection(
             peak_half_width_t_e=hsh_peak_half_width_t_e,
             event_half_width_t_e=hsh_event_half_width_t_e,
         )
+    if generate_release_photometry:
+        valid_release = forced_photometry.copy()
+        if not valid_release.empty and {"Target", "band", "magnitude"}.issubset(valid_release.columns):
+            valid_release["magnitude"] = pd.to_numeric(valid_release["magnitude"], errors="coerce")
+            valid_release = valid_release.loc[valid_release["magnitude"].notna()]
+            counts = valid_release.groupby(["Target", "band"], sort=False).size().unstack(fill_value=0)
+            for band in counts.columns:
+                combined[f"release_curve_points_{_safe_name(band)}"] = (
+                    combined["Target"].map(counts[band]).fillna(0).astype(int)
+                )
+            combined["release_curve_points_total"] = (
+                combined["Target"].map(valid_release.groupby("Target").size()).fillna(0).astype(int)
+            )
+        else:
+            combined["release_curve_points_total"] = 0
+
     combined.to_csv(paths["tables"] / "combined_targets.csv", index=False)
     save_target_summary(
         combined, photometry_dir=Path(root_dir) / "mop_photometry",
@@ -1826,12 +1855,16 @@ def run_target_selection(
             print("      Monitoring light-curve PDF", flush=True)
         report_epochs = registry.observation_epochs(combined)
         report_photometry = registry.photometry(combined)
+        report_layers = None if monitoring_layers is None else tuple(monitoring_layers)
+        if generate_release_photometry:
+            report_layers = tuple(dict.fromkeys((report_layers or ()) + ("release_photometry",)))
         create_monitoring_report(
             combined,
             paths["monitoring_reports"] / "lightcurves.pdf",
             mop=mop, mop_photometry_dir=Path(root_dir) / "mop_photometry",
+            release_photometry=forced_photometry if generate_release_photometry else None,
             lsst_coverage=coverage_rows, observatory_epochs=report_epochs,
-            observatory_photometry=report_photometry, data_release=release.name, layers=monitoring_layers,
+            observatory_photometry=report_photometry, data_release=release.name, layers=report_layers,
             plots_per_page=monitoring_report_plots_per_page,
         )
 
