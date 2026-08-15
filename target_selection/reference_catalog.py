@@ -550,6 +550,76 @@ def pivot_visit_summary(
     return output.reset_index()
 
 
+
+def query_direct_coadd_coverage(
+    targets: pd.DataFrame,
+    *,
+    butler: Any,
+    data_release: str | DataReleaseConfig,
+    cache_path: str | Path | None = None,
+    reuse_cache: bool = True,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """Query Butler directly for coadd datasets covering each target position.
+
+    This is intentionally separate from coadd-property maps: ``has_coadd``
+    means that a real coadd dataset was found, even if one of its optional
+    property-map values is missing.
+    """
+    release = get_data_release(data_release)
+    required = {"target_id", "ra_deg", "dec_deg"}
+    missing = required - set(targets.columns)
+    if missing:
+        raise ValueError(f"Targets are missing columns: {sorted(missing)}")
+    cache_file = Path(cache_path) if cache_path is not None else None
+    if reuse_cache and cache_file is not None and cache_file.exists():
+        return pd.read_csv(cache_file)
+    rows = []
+    iterator = targets[["target_id", "ra_deg", "dec_deg"]].dropna().itertuples(index=False)
+    if verbose:
+        try:
+            from tqdm import tqdm
+            iterator = tqdm(iterator, total=len(targets), desc="Direct coadd coverage", unit="target")
+        except ImportError:  # pragma: no cover
+            pass
+    for row in iterator:
+        bands: set[str] = set()
+        found_dataset = False
+        errors: list[str] = []
+        for dataset_type in release.coadd_dataset_types:
+            try:
+                refs = list(
+                    butler.query_datasets(
+                        dataset_type,
+                        where=release.coadd_spatial_where,
+                        bind={"ra": float(row.ra_deg), "dec": float(row.dec_deg)},
+                    )
+                )
+            except Exception as error:
+                refs = []
+                errors.append(f"{dataset_type}: {type(error).__name__}: {error}")
+            if refs:
+                found_dataset = True
+            for ref in refs:
+                band = _data_id_value(ref, "band")
+                if band is not None:
+                    bands.add(str(band))
+            if refs:
+                break
+        rows.append({
+            "target_id": str(row.target_id),
+            "has_coadd": found_dataset,
+            "coadd_n_bands": len(bands),
+            "coadd_bands": ",".join(sorted(bands)),
+            "coadd_query_status": "error" if errors and not bands else "queried",
+            "coadd_query_error": "; ".join(errors),
+        })
+    result = pd.DataFrame(rows)
+    if cache_file is not None:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        result.to_csv(cache_file, index=False)
+    return result
+
 def _sample_map_values(property_map: Any, ra: np.ndarray, dec: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     try:
         valid = np.asarray(
@@ -723,9 +793,18 @@ def rank_cutout_candidates(
 ) -> pd.DataFrame:
     """Assign transparent quality scores and lexicographic cutout priorities."""
     output = catalog.copy()
-    depth = pd.to_numeric(output.get("coadd_maglim_median"), errors="coerce")
-    seeing = pd.to_numeric(output.get("coadd_psf_fwhm_median_arcsec"), errors="coerce")
-    band_count = pd.to_numeric(output.get("coadd_n_bands"), errors="coerce").fillna(0)
+    depth = pd.to_numeric(
+        output.get("coadd_maglim_median", pd.Series(np.nan, index=output.index)),
+        errors="coerce",
+    )
+    seeing = pd.to_numeric(
+        output.get("coadd_psf_fwhm_median_arcsec", pd.Series(np.nan, index=output.index)),
+        errors="coerce",
+    )
+    band_count = pd.to_numeric(
+        output.get("coadd_n_bands", pd.Series(0, index=output.index)),
+        errors="coerce",
+    ).fillna(0)
     output["quality_depth_percentile"] = depth.rank(pct=True).fillna(0)
     output["quality_seeing_percentile"] = (-seeing).rank(pct=True).fillna(0)
     output["quality_band_coverage_fraction"] = band_count / max(1, len(tuple(bands)))
@@ -987,8 +1066,13 @@ def enrich_reference_catalog_coadds(
     coverage_catalog: pd.DataFrame,
     *,
     butler: Any = None,
+    sample_properties: bool = True,
 ) -> pd.DataFrame:
-    """Add coadd-map properties to a previously generated coverage catalog."""
+    """Add direct coadd coverage and optional map properties to a coverage catalog.
+
+    Butler is queried directly for the existence of coadd datasets. The optional
+    HealSparse property maps are sampled only when ``sample_properties`` is true.
+    """
     if not isinstance(config, ReferenceCatalogConfig):
         config = load_reference_catalog_config(config)
     config.validate()
@@ -997,18 +1081,34 @@ def enrich_reference_catalog_coadds(
         _, butler = _default_clients(release, tap_service=object(), butler=None)
     targets = coverage_catalog.copy()
     covered = pd.to_numeric(targets.get("n_images_total"), errors="coerce").fillna(0).gt(0)
-    map_targets = targets.loc[covered, ["target_id", "ra_deg", "dec_deg"]].copy()
+    coadd_targets = targets.loc[covered, ["target_id", "ra_deg", "dec_deg"]].copy()
     fingerprint = _catalog_fingerprint(targets[["target_id", "ra_deg", "dec_deg"]], release)
     cache_dir = Path(config.cache_dir) / _safe_name(release.name) / fingerprint
     cache_dir.mkdir(parents=True, exist_ok=True)
+    direct_cache_file = cache_dir / "direct_coadd_coverage.csv"
+    direct = (query_direct_coadd_coverage(
+        coadd_targets, butler=butler, data_release=release, cache_path=direct_cache_file,
+        reuse_cache=config.reuse_cache, verbose=config.verbose,
+    ) if len(coadd_targets) else pd.DataFrame({
+        "target_id": pd.Series(dtype=str), "has_coadd": pd.Series(dtype=bool),
+        "coadd_n_bands": pd.Series(dtype="int64"), "coadd_bands": pd.Series(dtype=str),
+        "coadd_query_status": pd.Series(dtype=str), "coadd_query_error": pd.Series(dtype=str),
+    }))
+    if config.verbose:
+        print(f"Direct coadd coverage: {direct_cache_file}", flush=True)
     map_signature = hashlib.sha256(json.dumps(
         [config.bands, config.property_maps, config.coadd_skymap, config.coadd_pixel_scale_arcsec],
         default=list, separators=(",", ":"),
     ).encode()).hexdigest()[:12]
     cache_file = cache_dir / f"coadd_properties_{map_signature}.csv"
-    if config.reuse_cache and cache_file.exists():
+    map_targets = coadd_targets.loc[
+        coadd_targets["target_id"].astype(str).isin(
+            direct.loc[direct["has_coadd"].fillna(False), "target_id"].astype(str)
+        )
+    ].copy()
+    if sample_properties and config.property_maps and config.reuse_cache and cache_file.exists():
         coadd = pd.read_csv(cache_file)
-    elif len(map_targets):
+    elif sample_properties and config.property_maps and len(map_targets):
         coadd = sample_coadd_properties(
             map_targets, butler=butler, bands=config.bands,
             property_maps=config.property_maps, skymap=config.coadd_skymap,
@@ -1017,10 +1117,15 @@ def enrich_reference_catalog_coadds(
         )
         coadd.to_csv(cache_file, index=False)
     else:
-        coadd = pd.DataFrame({"target_id": pd.Series(dtype=str), "has_coadd": pd.Series(dtype=bool), "coadd_n_bands": pd.Series(dtype=int)})
-    result = targets.merge(coadd, on="target_id", how="left")
+        coadd = pd.DataFrame({"target_id": pd.Series(dtype=str)})
+    result = targets.merge(direct, on="target_id", how="left").merge(
+        coadd, on="target_id", how="left", suffixes=("", "_map")
+    )
     result["has_coadd"] = result["has_coadd"].fillna(False).astype(bool)
     result["coadd_n_bands"] = pd.to_numeric(result["coadd_n_bands"], errors="coerce").fillna(0).astype(int)
+    if "coadd_bands" not in result:
+        result["coadd_bands"] = ""
+    result["coadd_bands"] = result["coadd_bands"].fillna("")
     result = rank_cutout_candidates(
         result, bands=config.bands, grades=config.cutout_grades,
         max_cutouts=config.max_cutouts, quality_weights=config.quality_weights,
@@ -1145,8 +1250,28 @@ def run_reference_catalog(
     covered_ids = set(
         visits.loc[pd.to_numeric(visits["n_images_total"], errors="coerce").fillna(0).gt(0), "target_id"].astype(str)
     )
-    map_targets = targets.loc[targets["target_id"].astype(str).isin(covered_ids)].copy()
+    coadd_targets = targets.loc[targets["target_id"].astype(str).isin(covered_ids),
+                                 ["target_id", "ra_deg", "dec_deg"]].copy()
+    direct_cache_file = cache_dir / "direct_coadd_coverage.csv"
+    direct = (query_direct_coadd_coverage(
+        coadd_targets, butler=butler, data_release=release,
+        cache_path=direct_cache_file, reuse_cache=config.reuse_cache,
+        verbose=config.verbose,
+    ) if len(coadd_targets) else pd.DataFrame({
+        "target_id": pd.Series(dtype=str), "has_coadd": pd.Series(dtype=bool),
+        "coadd_n_bands": pd.Series(dtype="int64"), "coadd_bands": pd.Series(dtype=str),
+        "coadd_query_status": pd.Series(dtype=str), "coadd_query_error": pd.Series(dtype=str),
+    }))
+    if config.verbose:
+        print(f"Direct coadd coverage: {direct_cache_file}", flush=True)
 
+    # Property maps are optional metadata. They are sampled only at positions
+    # where the direct Butler query found an actual coadd dataset.
+    map_targets = coadd_targets.loc[
+        coadd_targets["target_id"].astype(str).isin(
+            direct.loc[direct["has_coadd"].fillna(False), "target_id"].astype(str)
+        )
+    ].copy()
     map_signature = hashlib.sha256(
         json.dumps(
             [config.bands, config.property_maps, config.coadd_skymap,
@@ -1172,7 +1297,7 @@ def run_reference_catalog(
             coadd = cached_coadd
         if config.verbose:
             print(f"Coadd properties: cache ({coadd_cache_file})", flush=True)
-    elif len(map_targets):
+    elif len(map_targets) and config.property_maps:
         coadd = sample_coadd_properties(
             map_targets, butler=butler, bands=config.bands,
             property_maps=config.property_maps, skymap=config.coadd_skymap,
@@ -1181,15 +1306,11 @@ def run_reference_catalog(
         )
         coadd.to_csv(coadd_cache_file, index=False)
     else:
-        coadd = pd.DataFrame({
-            "target_id": pd.Series(dtype=str),
-            "coadd_n_bands": pd.Series(dtype="int64"),
-            "has_coadd": pd.Series(dtype=bool),
-            "coadd_bands": pd.Series(dtype=str),
-        })
+        coadd = pd.DataFrame({"target_id": pd.Series(dtype=str)})
 
     catalog = (
-        targets.merge(coadd, on="target_id", how="left")
+        targets.merge(direct, on="target_id", how="left")
+        .merge(coadd, on="target_id", how="left", suffixes=("", "_map"))
         .merge(visits, on="target_id", how="left")
         .merge(visit_status, on="target_id", how="left")
     )
@@ -1235,7 +1356,7 @@ def run_reference_catalog(
         "n_with_individual_images": int(catalog["n_images_total"].fillna(0).gt(0).sum()),
         "n_visit_coverage_queried": int(catalog["visit_coverage_queried"].sum()),
         "n_visit_query_errors": int(catalog["visit_query_status"].eq("error").sum()),
-        "n_visit_queries_skipped": int(catalog["visit_query_status"].eq("skipped_no_coadd").sum()),
+        "n_visit_queries_skipped": int(catalog["visit_query_status"].eq("skipped_no_coverage").sum()),
         "n_with_coadd": int(catalog["has_coadd"].fillna(False).sum()),
         "n_cutout_eligible": int(catalog["cutout_eligible"].sum()),
         "n_cutout_selected": int(catalog["cutout_selected"].sum()),

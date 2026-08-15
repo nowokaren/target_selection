@@ -53,7 +53,7 @@ The CLI and notebook call the same Python workflow and use the same TOML file.
 ```python
 from target_selection import (
     load_reference_catalog_config, run_reference_catalog,
-    run_reference_catalog_preview,
+    run_reference_catalog_preview, query_direct_coadd_coverage,
 )
 
 config = load_reference_catalog_config("configs/lastberu_dp2.toml")
@@ -69,7 +69,7 @@ The equivalent CLI command is:
 target-selection catalog --config configs/lastberu_dp2.toml
 ```
 
-`ReferenceCatalogResult` exposes `catalog`, `catalog_path`, `cutout_plan_path`, `manifest_path`, `output_dir`, and the aggregate `summary`. TAP and Butler clients can be supplied explicitly for tests or non-default RSP environments.
+`ReferenceCatalogResult` exposes `catalog`, `catalog_path`, `cutout_plan_path`, `manifest_path`, `output_dir`, and the aggregate `summary`. TAP and Butler clients can be supplied explicitly for tests or non-default RSP environments. For staged runs, `query_direct_coadd_coverage` checks real coadd dataset references with Butler; coadd-property maps are optional metadata and are not used to decide whether a coadd exists.
 
 ## Advanced low-level API
 

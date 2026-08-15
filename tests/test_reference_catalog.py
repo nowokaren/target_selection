@@ -9,6 +9,7 @@ from target_selection.reference_catalog import (
     load_target_catalog,
     pivot_visit_summary,
     query_visit_summary_by_band,
+    query_direct_coadd_coverage,
     rank_cutout_candidates,
     run_reference_catalog,
     sample_coadd_properties,
@@ -156,6 +157,29 @@ def test_visit_summary_is_pivoted_to_counts_per_band():
     result = pivot_visit_summary(data, ["a", "b"], ["g", "r"])
     assert result.loc[0, ["n_images_g", "n_images_r", "n_images_total"]].tolist() == [3, 4, 7]
     assert result.loc[1, "n_images_total"] == 0
+
+
+
+class DirectRef:
+    def __init__(self, band):
+        self.dataId = {"band": band}
+
+
+class DirectFakeButler:
+    def query_datasets(self, dataset_type, *, where=None, bind=None):
+        if bind["ra"] < 15:
+            return [DirectRef("g"), DirectRef("r")]
+        return []
+
+
+def test_direct_coadd_query_is_independent_of_property_maps(tmp_path):
+    result = query_direct_coadd_coverage(
+        _targets(), butler=DirectFakeButler(), data_release="DP2",
+        cache_path=tmp_path / "direct.csv", reuse_cache=False, verbose=False,
+    )
+    assert result["has_coadd"].tolist() == [True, False]
+    assert result.loc[0, "coadd_bands"] == "g,r"
+    assert result.loc[1, "coadd_n_bands"] == 0
 
 
 def test_coadd_maps_are_sampled_vectorially_and_psf_size_becomes_fwhm():

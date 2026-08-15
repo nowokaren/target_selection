@@ -30,22 +30,24 @@ cutout grids.
 
 ## How it scales
 
-The workflow does not issue one TAP query per target.
+The workflow does not issue one TAP query per target for VisitDetector coverage.
 
-1. Consolidated HealSparse coadd-property maps are sampled at all coordinates
-   using HTTP range reads of only the required coverage pixels.
-2. Targets with a coadd are grouped into HEALPix tiles. Each tile downloads only
-   nearby `VisitDetector` rows from TAP; exact detector-polygon matching and
-   aggregation by target and band are performed locally.
-3. Tiles and coadd samples are cached independently, and up to
-   `tap_max_workers` tiles are processed concurrently.
-4. Only the highest-priority targets within the configured cutout budget cause
-   individual coadds to be retrieved from Butler.
+1. A tiled TAP query downloads nearby `VisitDetector` rows; exact detector-polygon
+   matching and aggregation by target and band are performed locally.
+2. For targets with individual-image coverage, Butler is queried directly with the
+   release-specific coadd spatial predicate. This produces `has_coadd`,
+   `coadd_bands`, and `coadd_n_bands` from real dataset references, independently
+   of any property map.
+3. Optional consolidated HealSparse coadd-property maps are sampled only at
+   direct coadd matches, using HTTP range reads of the required coverage pixels.
+4. Tiles, direct coadd results, and map samples are cached independently. Only
+   the highest-priority targets within the configured cutout budget cause full
+   coadd images to be retrieved from Butler.
 
-With `visit_query_scope = "coadd"` (the default), positions without a coadd are
-recorded with `visit_query_status = "skipped_no_coadd"`; use `"all"` when exact
-VisitDetector coverage is required for every target. Rerunning an interrupted
-job reuses completed tiles and map samples when the release and coordinates are
+Targets whose VisitDetector query fails retain an error status. Targets with no
+individual-image coverage are not sent to the direct coadd query, because they
+are not cutout candidates in this workflow. Rerunning an interrupted job reuses
+completed tiles and direct/map results when the release and coordinates are
 unchanged.
 
 ## Scientific columns

@@ -8,6 +8,7 @@ from .reference_catalog import (
     run_reference_catalog,
     run_reference_catalog_preview,
     run_reference_coverage_catalog,
+    query_direct_coadd_coverage,
     enrich_reference_catalog_coadds,
     generate_reference_catalog_cutouts,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "run_reference_catalog",
     "run_reference_catalog_preview",
     "run_reference_coverage_catalog",
+    "query_direct_coadd_coverage",
     "enrich_reference_catalog_coadds",
     "generate_reference_catalog_cutouts",
 ]
