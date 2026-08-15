@@ -1115,6 +1115,7 @@ def generate_reference_catalog_cutouts(
     catalog: pd.DataFrame,
     *,
     butler: Any = None,
+    reuse_existing: bool | None = None,
 ) -> pd.DataFrame:
     """Generate prioritized coadd cutouts from an enriched reference catalog."""
     if not isinstance(config, ReferenceCatalogConfig):
@@ -1124,10 +1125,12 @@ def generate_reference_catalog_cutouts(
     if butler is None:
         _, butler = _default_clients(release, tap_service=object(), butler=None)
     output_dir = Path(config.output_dir) / _safe_name(config.name)
+    if reuse_existing is None:
+        reuse_existing = config.reuse_cache
     result = generate_prioritized_cutouts(
         catalog, butler=butler, data_release=release,
         output_dir=output_dir / "cutouts", bands=config.cutout_bands,
-        size_arcsec=config.cutout_size_arcsec, reuse_existing=config.reuse_cache,
+        size_arcsec=config.cutout_size_arcsec, reuse_existing=bool(reuse_existing),
         verbose=config.verbose,
     )
     result.to_csv(output_dir / "reference_catalog.csv", index=False)
