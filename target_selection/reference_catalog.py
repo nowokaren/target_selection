@@ -885,9 +885,16 @@ def save_coadd_cutout_grid(
         if band in by_band:
             by_band[band].append(ref)
 
-    n_columns = min(3, max(1, len(bands)))
+    # Rubin has at most six standard bands; keep them in one compact row so
+    # the target can be inspected at a glance. The fallback still supports a
+    # longer custom band list by wrapping after six panels.
+    n_columns = min(6, max(1, len(bands)))
     n_rows = math.ceil(len(bands) / n_columns)
-    figure, axes = plt.subplots(n_rows, n_columns, figsize=(3.35 * n_columns, 3.1 * n_rows), squeeze=False)
+    figure, axes = plt.subplots(
+        n_rows, n_columns,
+        figsize=(2.45 * n_columns, 2.55 * n_rows),
+        squeeze=False,
+    )
     plotted = 0
     for axis, band in zip(axes.flat, bands, strict=False):
         selected = None
@@ -943,12 +950,19 @@ def save_coadd_cutout_grid(
         plotted += 1
     for axis in axes.flat[len(bands) :]:
         axis.axis("off")
-    figure.suptitle(
-        f"{row['target_id']} — grade {row.get('selection_grade', '—')} — "
-        f"quality {float(row.get('coadd_quality_score', 0)):.1f}",
-        fontsize=11,
-    )
-    figure.tight_layout(rect=(0, 0, 1, 0.95))
+    grade = row.get("selection_grade", "—")
+    quality = pd.to_numeric(pd.Series([row.get("coadd_quality_score")]), errors="coerce").iloc[0]
+    n_images = pd.to_numeric(pd.Series([row.get("n_images_total")]), errors="coerce").iloc[0]
+    n_bands = pd.to_numeric(pd.Series([row.get("coadd_n_bands")]), errors="coerce").iloc[0]
+    details = [f"{row['target_id']}", f"grade {grade}"]
+    if pd.notna(quality):
+        details.append(f"quality {quality:.1f}")
+    if pd.notna(n_images):
+        details.append(f"N images {int(n_images)}")
+    if pd.notna(n_bands):
+        details.append(f"coadd bands {int(n_bands)}")
+    figure.suptitle(" — ".join(details), fontsize=10, y=0.985)
+    figure.subplots_adjust(left=0.025, right=0.995, bottom=0.13, top=0.84, wspace=0.08, hspace=0.05)
     if plotted == 0:
         plt.close(figure)
         return None, 0
