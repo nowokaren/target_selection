@@ -65,8 +65,7 @@ catalog fields. Added columns include:
   approximate PSF FWHM, accumulated exposure time, and sky noise;
 - `has_coadd_<band>`, `coadd_n_bands`, and `coadd_bands`;
 - normalized LaStBeRu grade and its source field; and
-- the quality-score components, cutout eligibility, rank, selection, status,
-  and output path.
+- cutout eligibility, grade-based priority rank, selection, status, and output path.
 
 The coadd PSF FWHM is derived from the property-map determinant radius using
 `FWHM = 2.35482 × radius × pixel_scale`. The configured DP2 coadd pixel scale
@@ -76,16 +75,11 @@ is 0.2 arcsec/pixel. The original radius in pixels is retained.
 
 Targets without a coadd are not cutout candidates. Grade order is strict:
 with the default `cutout_grades = ["A", "B"]`, all grade-A targets are placed
-before grade B. Within each grade, a transparent score combines:
+before grade B. Within each grade, targets with more available coadd bands are prioritized.
 
-- deeper coadd PSF magnitude limit (50%);
-- smaller coadd PSF FWHM (35%); and
-- more available coadd bands (15%).
-
-These weights are configurable. The score is a resource-prioritization
-heuristic, not a new lens classification. `max_cutouts` is the resource budget;
-the manifest reports how many targets have coadds, how many meet the allowed
-grades, how many were selected, and how many PNGs were generated.
+`max_cutouts` is the resource budget; the manifest reports how many targets have
+coadds, how many meet the allowed grades, how many were selected, and how many
+PNGs were generated.
 
 Each target PNG is one multi-band grid. Every panel is exactly the configured
 angular side length (20 arcsec by default), marks the catalog coordinate, and

@@ -42,17 +42,11 @@ reuse_cache = true
 
 # One PNG contains a 20-arcsec square panel for every requested coadd band.
 # Targets must have a coadd and one of cutout_grades. Grade order is strict;
-# image-quality score orders targets within each grade.
+# targets with more coadd bands are ordered first within each grade.
 generate_cutouts = true
 max_cutouts = 100
 cutout_size_arcsec = 20.0
-cutout_grades = ["A", "B"]
+cutout_grades = ["A", "B", "C", "D", "E"]
 cutout_bands = ["u", "g", "r", "i", "z", "y"]
 verbose = true
 
-# The quality score is a transparent prioritization heuristic, not a physical
-# classification. Weights are normalized automatically.
-[quality_weights]
-depth = 0.50
-seeing = 0.35
-band_coverage = 0.15

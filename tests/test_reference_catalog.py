@@ -198,7 +198,7 @@ def test_coadd_maps_are_sampled_vectorially_and_psf_size_becomes_fwhm():
     assert round(result.loc[0, "coadd_psf_fwhm_median_arcsec"], 3) == 0.942
 
 
-def test_cutout_ranking_keeps_grade_order_before_quality():
+def test_cutout_ranking_keeps_grade_order_before_band_count():
     catalog = pd.DataFrame(
         {
             "target_id": ["a-poor", "a-good", "b-best", "c"],

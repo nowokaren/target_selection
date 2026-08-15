@@ -9,7 +9,7 @@ import math
 import re
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -49,11 +49,6 @@ COADD_PROPERTY_MAPS: Mapping[str, tuple[str, str]] = {
     "epoch_max": ("deepCoadd_epoch_consolidated_map_max", "coadd_last_mjd"),
 }
 
-DEFAULT_QUALITY_WEIGHTS = {
-    "depth": 0.50,
-    "seeing": 0.35,
-    "band_coverage": 0.15,
-}
 
 
 def _tuple(value: Any) -> tuple[str, ...]:
@@ -103,9 +98,6 @@ class ReferenceCatalogConfig:
     cutout_size_arcsec: float = 20.0
     cutout_grades: tuple[str, ...] = ("A", "B")
     cutout_bands: tuple[str, ...] = ("u", "g", "r", "i", "z", "y")
-    quality_weights: Mapping[str, float] = field(
-        default_factory=lambda: dict(DEFAULT_QUALITY_WEIGHTS)
-    )
     verbose: bool = True
 
     def validate(self) -> "ReferenceCatalogConfig":
@@ -135,12 +127,6 @@ class ReferenceCatalogConfig:
             errors.append("cutout_size_arcsec must be positive")
         if self.coadd_pixel_scale_arcsec <= 0:
             errors.append("coadd_pixel_scale_arcsec must be positive")
-        missing_weights = set(DEFAULT_QUALITY_WEIGHTS) - set(self.quality_weights)
-        if missing_weights:
-            errors.append(f"quality_weights is missing: {sorted(missing_weights)}")
-        weights = [float(self.quality_weights[key]) for key in DEFAULT_QUALITY_WEIGHTS]
-        if any(weight < 0 for weight in weights) or not sum(weights) > 0:
-            errors.append("quality_weights must be non-negative and have a positive sum")
         if errors:
             raise ValueError("Invalid reference catalog configuration:\n- " + "\n- ".join(errors))
         return self
@@ -151,8 +137,6 @@ class ReferenceCatalogConfig:
         for key in ("bands", "property_maps", "cutout_grades", "cutout_bands"):
             if key in settings:
                 settings[key] = _tuple(settings[key])
-        if "quality_weights" in values:
-            settings["quality_weights"] = dict(values["quality_weights"])
         return cls(**settings).validate()
 
 
@@ -789,38 +773,16 @@ def rank_cutout_candidates(
     bands: Sequence[str],
     grades: Sequence[str] = ("A", "B"),
     max_cutouts: int = 100,
-    quality_weights: Mapping[str, float] = DEFAULT_QUALITY_WEIGHTS,
 ) -> pd.DataFrame:
-    """Assign transparent quality scores and lexicographic cutout priorities."""
+    """Assign cutout priorities using grade and coadd-band availability."""
     output = catalog.copy()
-    depth = pd.to_numeric(
-        output.get("coadd_maglim_median", pd.Series(np.nan, index=output.index)),
-        errors="coerce",
-    )
-    seeing = pd.to_numeric(
-        output.get("coadd_psf_fwhm_median_arcsec", pd.Series(np.nan, index=output.index)),
-        errors="coerce",
-    )
-    band_count = pd.to_numeric(
-        output.get("coadd_n_bands", pd.Series(0, index=output.index)),
-        errors="coerce",
-    ).fillna(0)
-    output["quality_depth_percentile"] = depth.rank(pct=True).fillna(0)
-    output["quality_seeing_percentile"] = (-seeing).rank(pct=True).fillna(0)
-    output["quality_band_coverage_fraction"] = band_count / max(1, len(tuple(bands)))
-    weight_sum = sum(float(quality_weights[key]) for key in DEFAULT_QUALITY_WEIGHTS)
-    output["coadd_quality_score"] = 100 * (
-        float(quality_weights["depth"]) * output["quality_depth_percentile"]
-        + float(quality_weights["seeing"]) * output["quality_seeing_percentile"]
-        + float(quality_weights["band_coverage"]) * output["quality_band_coverage_fraction"]
-    ) / weight_sum
     normalized_grades = tuple(str(grade).upper() for grade in grades)
     grade_rank = {grade: index for index, grade in enumerate(normalized_grades)}
     output["cutout_grade_rank"] = output["selection_grade"].astype(str).str.upper().map(grade_rank)
     output["cutout_eligible"] = output["has_coadd"].fillna(False).astype(bool) & output["cutout_grade_rank"].notna()
     candidates = output.loc[output["cutout_eligible"]].sort_values(
-        ["cutout_grade_rank", "coadd_quality_score", "coadd_n_bands", "target_id"],
-        ascending=[True, False, False, True],
+        ["cutout_grade_rank", "coadd_n_bands", "target_id"],
+        ascending=[True, False, True],
         kind="stable",
     )
     rank = pd.Series(pd.array(range(1, len(candidates) + 1), dtype="Int64"), index=candidates.index)
@@ -951,12 +913,9 @@ def save_coadd_cutout_grid(
     for axis in axes.flat[len(bands) :]:
         axis.axis("off")
     grade = row.get("selection_grade", "—")
-    quality = pd.to_numeric(pd.Series([row.get("coadd_quality_score")]), errors="coerce").iloc[0]
     n_images = pd.to_numeric(pd.Series([row.get("n_images_total")]), errors="coerce").iloc[0]
     n_bands = pd.to_numeric(pd.Series([row.get("coadd_n_bands")]), errors="coerce").iloc[0]
     details = [f"{row['target_id']}", f"grade {grade}"]
-    if pd.notna(quality):
-        details.append(f"quality {quality:.1f}")
     if pd.notna(n_images):
         details.append(f"N images {int(n_images)}")
     if pd.notna(n_bands):
@@ -1142,7 +1101,7 @@ def enrich_reference_catalog_coadds(
     result["coadd_bands"] = result["coadd_bands"].fillna("")
     result = rank_cutout_candidates(
         result, bands=config.bands, grades=config.cutout_grades,
-        max_cutouts=config.max_cutouts, quality_weights=config.quality_weights,
+        max_cutouts=config.max_cutouts,
     )
     output_dir = Path(config.output_dir) / _safe_name(config.name)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1341,7 +1300,6 @@ def run_reference_catalog(
         bands=config.bands,
         grades=config.cutout_grades,
         max_cutouts=config.max_cutouts,
-        quality_weights=config.quality_weights,
     )
     if config.generate_cutouts and config.max_cutouts:
         catalog = generate_prioritized_cutouts(
