@@ -591,13 +591,18 @@ def _partial_property_map(
     if not refs:
         raise LookupError(f"No {dataset_type} map for band {band}")
     uri = str(butler.getURI(refs[0]))
-    previous_rustfits = io_map.use_rustfits
-    previous_fitsio = io_map.use_fitsio
+    # HealSparse has used different optional FITS-reader flags across
+    # releases. Treat missing flags as unsupported instead of making the
+    # partial-read path fail and falling back to a full Butler.get.
+    previous_rustfits = getattr(io_map, "use_rustfits", None)
+    previous_fitsio = getattr(io_map, "use_fitsio", None)
     try:
         # fitsio/CFITSIO supports HTTP range reads; rustfits currently attempts
         # to load the entire remote artifact (about 750 MB for a DP2 map).
-        io_map.use_rustfits = False
-        io_map.use_fitsio = True
+        if previous_rustfits is not None:
+            io_map.use_rustfits = False
+        if previous_fitsio is not None:
+            io_map.use_fitsio = True
         coverage = healsparse.HealSparseCoverage.read(uri)
         coverage_pixels = np.unique(
             hpgeom.angle_to_pixel(
@@ -610,8 +615,10 @@ def _partial_property_map(
         )
         return healsparse.HealSparseMap.read(uri, pixels=coverage_pixels.tolist())
     finally:
-        io_map.use_rustfits = previous_rustfits
-        io_map.use_fitsio = previous_fitsio
+        if previous_rustfits is not None:
+            io_map.use_rustfits = previous_rustfits
+        if previous_fitsio is not None:
+            io_map.use_fitsio = previous_fitsio
 
 
 def sample_coadd_properties(
