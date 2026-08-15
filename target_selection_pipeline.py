@@ -1802,6 +1802,22 @@ def run_target_selection(
             hsh_summary, paths["tables"] / "hsh_observation_summary.csv",
         )
         combined = combined.merge(hsh_summary, on="Target", how="left")
+    if generate_release_photometry:
+        valid_release = forced_photometry.copy()
+        if not valid_release.empty and {"Target", "band", "magnitude"}.issubset(valid_release.columns):
+            valid_release["magnitude"] = pd.to_numeric(valid_release["magnitude"], errors="coerce")
+            valid_release = valid_release.loc[valid_release["magnitude"].notna()]
+            counts = valid_release.groupby(["Target", "band"], sort=False).size().unstack(fill_value=0)
+            for band in counts.columns:
+                combined[f"release_curve_points_{_safe_name(band)}"] = (
+                    combined["Target"].map(counts[band]).fillna(0).astype(int)
+                )
+            combined["release_curve_points_total"] = (
+                combined["Target"].map(valid_release.groupby("Target").size()).fillna(0).astype(int)
+            )
+        else:
+            combined["release_curve_points_total"] = 0
+
     if generate_observing_selection_summary:
         from observing_selection_summary import (
             build_observing_selection_summary,
@@ -1825,22 +1841,6 @@ def run_target_selection(
             peak_half_width_t_e=hsh_peak_half_width_t_e,
             event_half_width_t_e=hsh_event_half_width_t_e,
         )
-    if generate_release_photometry:
-        valid_release = forced_photometry.copy()
-        if not valid_release.empty and {"Target", "band", "magnitude"}.issubset(valid_release.columns):
-            valid_release["magnitude"] = pd.to_numeric(valid_release["magnitude"], errors="coerce")
-            valid_release = valid_release.loc[valid_release["magnitude"].notna()]
-            counts = valid_release.groupby(["Target", "band"], sort=False).size().unstack(fill_value=0)
-            for band in counts.columns:
-                combined[f"release_curve_points_{_safe_name(band)}"] = (
-                    combined["Target"].map(counts[band]).fillna(0).astype(int)
-                )
-            combined["release_curve_points_total"] = (
-                combined["Target"].map(valid_release.groupby("Target").size()).fillna(0).astype(int)
-            )
-        else:
-            combined["release_curve_points_total"] = 0
-
     combined.to_csv(paths["tables"] / "combined_targets.csv", index=False)
     save_target_summary(
         combined, photometry_dir=Path(root_dir) / "mop_photometry",

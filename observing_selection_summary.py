@@ -317,6 +317,10 @@ def build_observing_selection_summary(
         "Target", "target_region", "mag_now", "visible_hours", "best_observation_date", "visible_from", "visible_to",
         "stage_classification_available", "has_current_mop_data", "t_E_days", "t_0_HJD", "u_0",
     ]].copy()
+    if "release_curve_points_total" in selected:
+        result["release_curve_points_total"] = pd.to_numeric(
+            selected["release_curve_points_total"], errors="coerce"
+        ).fillna(0).astype(int)
     result = result.merge(last_magnitudes, on="Target", how="left")
     for summary in summaries:
         result = result.merge(summary, on="Target", how="left")
@@ -360,6 +364,9 @@ def save_observing_selection_summary(
     # measurements remain the visual focus of the table.
     columns = ["Target", "target_region", "mag_now", "last_mag", "last_mag_filter", "visible_hours"]
     labels = ["Target", "Region", "mag now", "Last mag", "Last filter", "Visible [h]"]
+    if "release_curve_points_total" in summary:
+        columns.append("release_curve_points_total")
+        labels.append(f"{release_name} curve [N]")
     top_groups = ["" for _ in columns]
     stage_headers = ["" for _ in columns]
     survey_headers = list(labels)
@@ -396,9 +403,16 @@ def save_observing_selection_summary(
         if column.startswith("mop_"):
             display[column] = numeric.map(lambda value: "—" if pd.isna(value) else str(int(value)))
         elif column.startswith(("hsh_", "release_")) or column in {"mag_now", "last_mag", "visible_hours", "t_E_days", "t_0_HJD", "u_0"}:
-            display[column] = numeric.map(lambda value: "—" if pd.isna(value) else f"{value:.1f}")
+            if column == "release_curve_points_total":
+                display[column] = numeric.map(lambda value: "—" if pd.isna(value) else str(int(value)))
+            else:
+                display[column] = numeric.map(lambda value: "—" if pd.isna(value) else f"{value:.1f}")
     unavailable = ~summary["stage_classification_available"].astype(bool)
-    stage_indices = [index for index, column in enumerate(columns) if column.startswith(("mop_", "hsh_", "release_"))]
+    stage_indices = [
+        index for index, column in enumerate(columns)
+        if column.startswith(("mop_", "hsh_", "release_"))
+        and column != "release_curve_points_total"
+    ]
     for row_index in np.flatnonzero(unavailable):
         for column_index in stage_indices:
             display.iat[row_index, column_index] = "—"
