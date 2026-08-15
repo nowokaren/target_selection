@@ -466,7 +466,7 @@ def query_visit_summary_by_band(
         iterator: Any = map(query_tile, grouped)
         if verbose and grouped:
             try:
-                from tqdm.auto import tqdm
+                from tqdm import tqdm
 
                 iterator = tqdm(iterator, total=len(grouped), desc="Visit tiles", unit="tile")
             except ImportError:  # pragma: no cover
@@ -478,7 +478,7 @@ def query_visit_summary_by_band(
             iterator = as_completed(futures)
             if verbose and grouped:
                 try:
-                    from tqdm.auto import tqdm
+                    from tqdm import tqdm
 
                     iterator = tqdm(iterator, total=len(grouped), desc="Visit tiles", unit="tile")
                 except ImportError:  # pragma: no cover
@@ -897,7 +897,7 @@ def generate_prioritized_cutouts(
     iterator: Any = selected.iterrows()
     if verbose and len(selected):
         try:
-            from tqdm.auto import tqdm
+            from tqdm import tqdm
 
             iterator = tqdm(iterator, total=len(selected), desc="Coadd cutouts", unit="target")
         except ImportError:  # pragma: no cover - tqdm is a project dependency.
@@ -926,6 +926,134 @@ def generate_prioritized_cutouts(
             output.at[index, "cutout_status"] = f"error: {type(error).__name__}: {error}"
     return output
 
+
+
+def run_reference_coverage_catalog(
+    config: ReferenceCatalogConfig | str | Path,
+    *,
+    tap_service: Any = None,
+) -> pd.DataFrame:
+    """Build and cache the fast TAP-only coverage catalog.
+
+    This stage does not initialize Butler or read coadd maps. It returns one
+    row per input target with per-band image counts and VisitDetector quality
+    summaries, making it suitable as the first pass over a very large catalog.
+    """
+    if not isinstance(config, ReferenceCatalogConfig):
+        config = load_reference_catalog_config(config)
+    config.validate()
+    release = get_data_release(config.data_release)
+    tap_service, _ = _default_clients(release, tap_service, butler=object())
+    targets = load_target_catalog(config)
+    fingerprint = _catalog_fingerprint(targets, release)
+    cache_dir = Path(config.cache_dir) / _safe_name(release.name) / fingerprint
+    output_dir = Path(config.output_dir) / _safe_name(config.name)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    visits_long = query_visit_summary_by_band(
+        targets, tap_service=tap_service, data_release=release,
+        tile_nside=config.tap_tile_nside, max_workers=config.tap_max_workers,
+        timeout_seconds=config.tap_timeout_seconds,
+        search_radius_deg=config.detector_search_radius_deg,
+        cache_dir=cache_dir / "visit_tiles", reuse_cache=config.reuse_cache,
+        verbose=config.verbose,
+    )
+    visit_status = visits_long.attrs.get(
+        "target_status",
+        pd.DataFrame(columns=["target_id", "visit_query_status", "visit_query_error"]),
+    )
+    completed_ids = visit_status.loc[
+        ~visit_status["visit_query_status"].eq("error"), "target_id"
+    ].astype(str)
+    visits = pivot_visit_summary(
+        visits_long, targets["target_id"], config.bands,
+        queried_target_ids=completed_ids,
+    )
+    catalog = targets.merge(visits, on="target_id", how="left").merge(
+        visit_status, on="target_id", how="left",
+    )
+    catalog["visit_query_status"] = catalog["visit_query_status"].fillna("skipped_no_coverage")
+    catalog["visit_query_error"] = catalog["visit_query_error"].fillna("")
+    catalog["visit_coverage_queried"] = catalog["visit_query_status"].isin({"queried", "cache"})
+    catalog_path = output_dir / "coverage_catalog.csv"
+    catalog.to_csv(catalog_path, index=False)
+    if config.verbose:
+        print(f"Coverage catalog: {catalog_path}", flush=True)
+    return catalog
+
+
+def enrich_reference_catalog_coadds(
+    config: ReferenceCatalogConfig | str | Path,
+    coverage_catalog: pd.DataFrame,
+    *,
+    butler: Any = None,
+) -> pd.DataFrame:
+    """Add coadd-map properties to a previously generated coverage catalog."""
+    if not isinstance(config, ReferenceCatalogConfig):
+        config = load_reference_catalog_config(config)
+    config.validate()
+    release = get_data_release(config.data_release)
+    if butler is None:
+        _, butler = _default_clients(release, tap_service=object(), butler=None)
+    targets = coverage_catalog.copy()
+    covered = pd.to_numeric(targets.get("n_images_total"), errors="coerce").fillna(0).gt(0)
+    map_targets = targets.loc[covered, ["target_id", "ra_deg", "dec_deg"]].copy()
+    fingerprint = _catalog_fingerprint(targets[["target_id", "ra_deg", "dec_deg"]], release)
+    cache_dir = Path(config.cache_dir) / _safe_name(release.name) / fingerprint
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    map_signature = hashlib.sha256(json.dumps(
+        [config.bands, config.property_maps, config.coadd_skymap, config.coadd_pixel_scale_arcsec],
+        default=list, separators=(",", ":"),
+    ).encode()).hexdigest()[:12]
+    cache_file = cache_dir / f"coadd_properties_{map_signature}.csv"
+    if config.reuse_cache and cache_file.exists():
+        coadd = pd.read_csv(cache_file)
+    elif len(map_targets):
+        coadd = sample_coadd_properties(
+            map_targets, butler=butler, bands=config.bands,
+            property_maps=config.property_maps, skymap=config.coadd_skymap,
+            pixel_scale_arcsec=config.coadd_pixel_scale_arcsec,
+            partial_reads=config.partial_property_map_reads, verbose=config.verbose,
+        )
+        coadd.to_csv(cache_file, index=False)
+    else:
+        coadd = pd.DataFrame({"target_id": pd.Series(dtype=str), "has_coadd": pd.Series(dtype=bool), "coadd_n_bands": pd.Series(dtype=int)})
+    result = targets.merge(coadd, on="target_id", how="left")
+    result["has_coadd"] = result["has_coadd"].fillna(False).astype(bool)
+    result["coadd_n_bands"] = pd.to_numeric(result["coadd_n_bands"], errors="coerce").fillna(0).astype(int)
+    result = rank_cutout_candidates(
+        result, bands=config.bands, grades=config.cutout_grades,
+        max_cutouts=config.max_cutouts, quality_weights=config.quality_weights,
+    )
+    output_dir = Path(config.output_dir) / _safe_name(config.name)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    result.to_csv(output_dir / "reference_catalog.csv", index=False)
+    result.loc[result["cutout_eligible"]].sort_values("cutout_priority_rank").to_csv(output_dir / "cutout_plan.csv", index=False)
+    return result
+
+
+def generate_reference_catalog_cutouts(
+    config: ReferenceCatalogConfig | str | Path,
+    catalog: pd.DataFrame,
+    *,
+    butler: Any = None,
+) -> pd.DataFrame:
+    """Generate prioritized coadd cutouts from an enriched reference catalog."""
+    if not isinstance(config, ReferenceCatalogConfig):
+        config = load_reference_catalog_config(config)
+    config.validate()
+    release = get_data_release(config.data_release)
+    if butler is None:
+        _, butler = _default_clients(release, tap_service=object(), butler=None)
+    output_dir = Path(config.output_dir) / _safe_name(config.name)
+    result = generate_prioritized_cutouts(
+        catalog, butler=butler, data_release=release,
+        output_dir=output_dir / "cutouts", bands=config.cutout_bands,
+        size_arcsec=config.cutout_size_arcsec, reuse_existing=config.reuse_cache,
+        verbose=config.verbose,
+    )
+    result.to_csv(output_dir / "reference_catalog.csv", index=False)
+    return result
 
 def run_reference_catalog_preview(
     config: ReferenceCatalogConfig | str | Path,

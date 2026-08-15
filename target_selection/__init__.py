@@ -7,6 +7,9 @@ from .reference_catalog import (
     load_reference_catalog_config,
     run_reference_catalog,
     run_reference_catalog_preview,
+    run_reference_coverage_catalog,
+    enrich_reference_catalog_coadds,
+    generate_reference_catalog_cutouts,
 )
 
 __all__ = [
@@ -19,6 +22,9 @@ __all__ = [
     "run_analysis",
     "run_reference_catalog",
     "run_reference_catalog_preview",
+    "run_reference_coverage_catalog",
+    "enrich_reference_catalog_coadds",
+    "generate_reference_catalog_cutouts",
 ]
 
 
