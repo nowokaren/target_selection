@@ -119,7 +119,7 @@ marker_encoding = "split_color"
 | `monitoring_report` | Boolean, `true` | Write the multipage light-curve and temporal-coverage PDF. Without a reference survey it includes MOP and configured follow-up layers only. |
 | `target_reports` | Boolean, `false` | Write individual coadd dashboards. This is an expensive stage. |
 | `target_report_scope` | String, `"visibility_selected"` | `"visibility_selected"` or `"all_queried"`. |
-| `reference_photometry` | Boolean, `false` | Enable reference-survey forced photometry. This may be expensive. |
+| `reference_photometry` | Boolean, `false` | Enable reference-survey forced photometry or published DIA light curves. Valid DIA points are added to `lightcurves.pdf`, target reports, and the target summary with per-band counts. This may be expensive. |
 | `reference_photometry_targets` | List or omitted | Named target subset. Omit while photometry is enabled to request all eligible targets. |
 | `coverage_background` | Boolean, `false` | Add muted low-resolution visit-density context to sky maps. |
 | `marker_encoding` | String, `"split_color"` | `"split_color"`: magnitude and visits use marker halves. `"color_size"`: magnitude uses color and visits use size. |
@@ -131,6 +131,7 @@ Recommended normalized monitoring layers are:
 |---|---|
 | `target_provider_photometry` | Provider light curve, currently mapped to MOP photometry |
 | `reference_epochs` | Epoch markers from the active reference survey |
+| `release_photometry` | Published reference-survey DIA/forced-source photometric points; enabled automatically when `reference_photometry = true` |
 | `followup_surveys` | All selected HSH/JS-style follow-up layers |
 
 Product availability also depends on mode. Planning-only mode intentionally
