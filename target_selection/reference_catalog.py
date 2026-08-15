@@ -986,41 +986,11 @@ def run_reference_catalog(
         print(f"Catalog targets: {len(targets)}", flush=True)
         print(f"Data release: {release.name}", flush=True)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    map_signature = hashlib.sha256(
-        json.dumps(
-            [config.bands, config.property_maps, config.coadd_skymap,
-             config.coadd_pixel_scale_arcsec],
-            default=list,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()[:12]
-    coadd_cache_file = cache_dir / f"coadd_properties_{map_signature}.csv"
-    if config.reuse_cache and coadd_cache_file.exists():
-        coadd = pd.read_csv(coadd_cache_file)
-        if config.verbose:
-            print(f"Coadd properties: cache ({coadd_cache_file})", flush=True)
-    else:
-        coadd = sample_coadd_properties(
-            targets,
-            butler=butler,
-            bands=config.bands,
-            property_maps=config.property_maps,
-            skymap=config.coadd_skymap,
-            pixel_scale_arcsec=config.coadd_pixel_scale_arcsec,
-            partial_reads=config.partial_property_map_reads,
-            verbose=config.verbose,
-        )
-        coadd.to_csv(coadd_cache_file, index=False)
-
-    coverage_targets = targets.merge(
-        coadd[["target_id", "has_coadd"]], on="target_id", how="left"
-    )
-    if config.visit_query_scope == "coadd":
-        coverage_targets = coverage_targets.loc[
-            coverage_targets["has_coadd"].fillna(False).astype(bool)
-        ].copy()
+    # Coverage-first workflow: TAP provides the per-target/per-band image
+    # counts and medians before any coadd-property maps are read. This avoids
+    # touching maps for targets with no individual-image coverage.
     visits_long = query_visit_summary_by_band(
-        coverage_targets,
+        targets,
         tap_service=tap_service,
         data_release=release,
         tile_nside=config.tap_tile_nside,
@@ -1044,13 +1014,61 @@ def run_reference_catalog(
         config.bands,
         queried_target_ids=completed_ids,
     )
+    covered_ids = set(
+        visits.loc[pd.to_numeric(visits["n_images_total"], errors="coerce").fillna(0).gt(0), "target_id"].astype(str)
+    )
+    map_targets = targets.loc[targets["target_id"].astype(str).isin(covered_ids)].copy()
+
+    map_signature = hashlib.sha256(
+        json.dumps(
+            [config.bands, config.property_maps, config.coadd_skymap,
+             config.coadd_pixel_scale_arcsec],
+            default=list,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()[:12]
+    coadd_cache_file = cache_dir / f"coadd_properties_{map_signature}.csv"
+    if config.reuse_cache and coadd_cache_file.exists():
+        cached_coadd = pd.read_csv(coadd_cache_file)
+        missing_ids = set(map_targets["target_id"].astype(str)) - set(cached_coadd["target_id"].astype(str))
+        if missing_ids:
+            new_coadd = sample_coadd_properties(
+                map_targets.loc[map_targets["target_id"].astype(str).isin(missing_ids)],
+                butler=butler, bands=config.bands, property_maps=config.property_maps,
+                skymap=config.coadd_skymap, pixel_scale_arcsec=config.coadd_pixel_scale_arcsec,
+                partial_reads=config.partial_property_map_reads, verbose=config.verbose,
+            )
+            coadd = pd.concat([cached_coadd, new_coadd], ignore_index=True, sort=False).drop_duplicates("target_id", keep="last")
+            coadd.to_csv(coadd_cache_file, index=False)
+        else:
+            coadd = cached_coadd
+        if config.verbose:
+            print(f"Coadd properties: cache ({coadd_cache_file})", flush=True)
+    elif len(map_targets):
+        coadd = sample_coadd_properties(
+            map_targets, butler=butler, bands=config.bands,
+            property_maps=config.property_maps, skymap=config.coadd_skymap,
+            pixel_scale_arcsec=config.coadd_pixel_scale_arcsec,
+            partial_reads=config.partial_property_map_reads, verbose=config.verbose,
+        )
+        coadd.to_csv(coadd_cache_file, index=False)
+    else:
+        coadd = pd.DataFrame({
+            "target_id": pd.Series(dtype=str),
+            "coadd_n_bands": pd.Series(dtype="int64"),
+            "has_coadd": pd.Series(dtype=bool),
+            "coadd_bands": pd.Series(dtype=str),
+        })
+
     catalog = (
         targets.merge(coadd, on="target_id", how="left")
         .merge(visits, on="target_id", how="left")
         .merge(visit_status, on="target_id", how="left")
     )
+    catalog["has_coadd"] = catalog["has_coadd"].fillna(False).astype(bool)
+    catalog["coadd_n_bands"] = pd.to_numeric(catalog["coadd_n_bands"], errors="coerce").fillna(0).astype(int)
     skipped = catalog["visit_query_status"].isna()
-    catalog.loc[skipped, "visit_query_status"] = "skipped_no_coadd"
+    catalog.loc[skipped, "visit_query_status"] = "skipped_no_coverage"
     catalog.loc[skipped, "visit_query_error"] = ""
     catalog["visit_coverage_queried"] = catalog["visit_query_status"].isin(
         ["queried", "cache"]

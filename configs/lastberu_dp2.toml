@@ -27,7 +27,8 @@ property_maps = ["maglim", "psf_size", "exposure_time", "sky_noise"]
 coadd_skymap = "lsst_cells_v2"
 coadd_pixel_scale_arcsec = 0.2
 
-# VisitDetector rows are retrieved by occupied HEALPix tiles and matched to detector polygons locally.
+# VisitDetector rows are retrieved first by occupied HEALPix tiles and matched to detector polygons locally.
+# Coadd property maps are sampled only for targets with individual-image coverage.
 # A failed/interrupted run can resume from cached tiles. Omit target_limit for all rows;
 # set it to a small positive integer only for a trial run.
 partial_property_map_reads = true

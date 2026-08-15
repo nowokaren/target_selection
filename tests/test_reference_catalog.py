@@ -55,7 +55,10 @@ class FakeMap:
         self.valid = np.ones(len(self.values), dtype=bool) if valid is None else np.asarray(valid, dtype=bool)
 
     def get_values_pos(self, ra, dec, lonlat=True, valid_mask=False):
-        return self.valid.copy() if valid_mask else self.values.copy()
+        size = len(np.asarray(ra))
+        values = self.values[:size]
+        valid = self.valid[:size]
+        return valid.copy() if valid_mask else values.copy()
 
 
 class FakeButler:

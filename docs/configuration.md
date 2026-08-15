@@ -299,3 +299,7 @@ duplicates, and basic numeric ranges. It does **not** contact MOP, TAP, or
 Butler and does not open configured CSV files. Adapter, file, credential, and
 remote-service checks occur when the analysis starts. See
 [Architecture: What validation means](architecture.md#what-validation-means).
+
+### Large-catalog execution order
+
+The catalog workflow first queries VisitDetector coverage and then samples coadd property maps only for covered targets. Full coadd images are loaded only for prioritized cutouts.
