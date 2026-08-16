@@ -1013,7 +1013,13 @@ def generate_prioritized_cutouts(
     for index, row in iterator:
         filename = f"{int(row['cutout_priority_rank']):04d}_{_safe_name(row['target_id'])}_coadds.png"
         existing_path = Path(output_dir) / filename
-        if reuse_existing and existing_path.exists():
+        fits_dir = Path(fits_output_dir) if fits_output_dir is not None else Path(output_dir)
+        expected_fits = [
+            fits_dir / f"{_safe_name(row['target_id'])}_{band}.fits"
+            for band in bands
+        ]
+        fits_ready = (not save_fits) or all(path.exists() for path in expected_fits)
+        if reuse_existing and existing_path.exists() and fits_ready:
             output.at[index, "cutout_status"] = "reused"
             output.at[index, "cutout_path"] = str(existing_path)
             output.at[index, "cutout_n_bands"] = int(row.get("coadd_n_bands", 0))
