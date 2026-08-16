@@ -83,7 +83,9 @@ PNGs were generated.
 
 Each target PNG is one multi-band grid. Every panel is exactly the configured
 angular side length (20 arcsec by default), marks the catalog coordinate, and
-reports the band image count, coadd depth, and PSF FWHM when available.
+reports the band image count, coadd depth, and PSF FWHM when available. Set
+`save_cutout_fits = true` to also save one float32 FITS image per band as
+`<target_id>_<band>.fits` in the `cutouts/` directory.
 
 ## Products
 

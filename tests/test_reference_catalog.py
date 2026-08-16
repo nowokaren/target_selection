@@ -125,9 +125,9 @@ def test_load_target_catalog_extracts_preferred_grade(tmp_path):
         extra_info_column="metadata",
     )
     result = load_target_catalog(config)
-    assert result["selection_grade"].tolist()[:2] == ["A", "B"]
+    assert result["selection_grade"].tolist()[:2] == ["A", None]
     assert pd.isna(result.loc[2, "selection_grade"])
-    assert result["selection_grade_source"].tolist() == ["vetting_grade", "Grade", "unavailable"]
+    assert result["selection_grade_source"].tolist() == ["extra_info_first", "unavailable", "unavailable"]
 
 
 def test_visit_query_uses_spatial_tiles_and_exact_detector_polygons(tmp_path):
@@ -238,4 +238,6 @@ def test_full_catalog_run_writes_dataset_plan_and_manifest(tmp_path):
     result = run_reference_catalog(config, tap_service=service, butler=FakeButler())
     assert result.catalog_path.exists()
     assert result.cutout_plan_path.exists()
+    public_columns = pd.read_csv(result.catalog_path).columns
+    assert not any(str(column).startswith("cutout_") for column in public_columns)
     assert json.loads(result.manifest_path.read_text())["summary"]["n_targets"] == 2

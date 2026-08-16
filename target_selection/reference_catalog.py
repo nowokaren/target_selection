@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import gc
 import hashlib
 import json
@@ -98,6 +99,7 @@ class ReferenceCatalogConfig:
     cutout_size_arcsec: float = 20.0
     cutout_grades: tuple[str, ...] = ("A", "B")
     cutout_bands: tuple[str, ...] = ("u", "g", "r", "i", "z", "y")
+    save_cutout_fits: bool = False
     verbose: bool = True
 
     def validate(self) -> "ReferenceCatalogConfig":
@@ -171,6 +173,33 @@ def _extra_value(series: pd.Series, key: str) -> pd.Series:
     return series.fillna("").astype(str).str.extract(pattern, expand=False)
 
 
+def _first_extra_value(value: Any) -> Any:
+    """Return the first component of a serialized LaStBeRu extra-info array."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return pd.NA
+    if isinstance(value, (list, tuple)):
+        return value[0] if value else pd.NA
+    text = str(value).strip()
+    if not text:
+        return pd.NA
+    # Some exports use a Python/JSON list representation.
+    if text[:1] in "[({":
+        try:
+            parsed = ast.literal_eval(text)
+            if isinstance(parsed, (list, tuple)) and parsed:
+                return parsed[0]
+        except (SyntaxError, ValueError):
+            pass
+    # The current LaStBeRu CSV stores key=value components separated by commas;
+    # the first component is vetting_grade and is the authoritative grade.
+    first = text.split(",", 1)[0].strip()
+    return first.split("=", 1)[1].strip() if "=" in first else first
+
+
+def _first_extra_series(series: pd.Series) -> pd.Series:
+    return series.map(_first_extra_value)
+
+
 def _normalized_grade(value: Any) -> str | None:
     if value is None or pd.isna(value):
         return None
@@ -211,15 +240,13 @@ def load_target_catalog(config: ReferenceCatalogConfig) -> pd.DataFrame:
 
     if config.extra_info_column and config.extra_info_column in data:
         extra = data[config.extra_info_column]
-        data["vetting_grade_raw"] = _extra_value(extra, "vetting_grade")
+        data["vetting_grade_raw"] = _first_extra_series(extra)
+        # Retain the later Grade field for provenance, but never use it as a
+        # fallback: the first extra_info component is authoritative.
         data["catalog_grade_raw"] = _extra_value(extra, "Grade")
-        vetting = data["vetting_grade_raw"].map(_normalized_grade)
-        catalog = data["catalog_grade_raw"].map(_normalized_grade)
-        data["selection_grade"] = vetting.fillna(catalog)
-        data["selection_grade_source"] = np.select(
-            [vetting.notna(), catalog.notna()],
-            ["vetting_grade", "Grade"],
-            default="unavailable",
+        data["selection_grade"] = data["vetting_grade_raw"].map(_normalized_grade)
+        data["selection_grade_source"] = np.where(
+            data["selection_grade"].notna(), "extra_info_first", "unavailable"
         )
     else:
         data["vetting_grade_raw"] = pd.NA
@@ -767,6 +794,13 @@ def sample_coadd_properties(
     return output.reset_index()
 
 
+def _catalog_without_cutout_columns(catalog: pd.DataFrame) -> pd.DataFrame:
+    """Return the public reference catalog without internal cutout state."""
+    return catalog.loc[
+        :, [not str(column).startswith("cutout_") for column in catalog.columns]
+    ].copy()
+
+
 def rank_cutout_candidates(
     catalog: pd.DataFrame,
     *,
@@ -818,6 +852,8 @@ def save_coadd_cutout_grid(
     output_path: str | Path,
     bands: Sequence[str],
     size_arcsec: float = 20.0,
+    save_fits: bool = False,
+    fits_output_dir: str | Path | None = None,
 ) -> tuple[Path | None, int]:
     """Save a multi-band square cutout grid for one target."""
     import astropy.units as u
@@ -895,6 +931,24 @@ def save_coadd_cutout_grid(
             clip=True,
         )
         axis.imshow(cutout, origin="lower", cmap="gray", norm=norm, extent=extent)
+        if save_fits:
+            from astropy.io import fits
+
+            fits_dir = Path(fits_output_dir) if fits_output_dir is not None else Path(output_path).parent
+            fits_dir.mkdir(parents=True, exist_ok=True)
+            fits_path = fits_dir / f"{_safe_name(row['target_id'])}_{band}.fits"
+            hdu = fits.PrimaryHDU(data=np.asarray(cutout, dtype=np.float32))
+            hdu.header["TARGET"] = str(row["target_id"])
+            hdu.header["BAND"] = str(band)
+            hdu.header["RA_DEG"] = float(row["ra_deg"])
+            hdu.header["DEC_DEG"] = float(row["dec_deg"])
+            hdu.header["SIZE_ARC"] = float(size_arcsec)
+            hdu.header["PIXSCALE"] = float(pixel_scale)
+            try:
+                hdu.header.extend(coadd.fits_wcs.to_header(), update=True)
+            except Exception:
+                pass
+            hdu.writeto(fits_path, overwrite=True)
         axis.add_patch(plt.Circle((0, 0), 0.8, edgecolor="red", facecolor="none", lw=1.2))
         subtitle = []
         for column, label, fmt in (
@@ -941,6 +995,8 @@ def generate_prioritized_cutouts(
     bands: Sequence[str],
     size_arcsec: float = 20.0,
     reuse_existing: bool = True,
+    save_fits: bool = False,
+    fits_output_dir: str | Path | None = None,
     verbose: bool = True,
 ) -> pd.DataFrame:
     """Generate cutouts only for rows selected by the ranking budget."""
@@ -970,6 +1026,8 @@ def generate_prioritized_cutouts(
                 output_path=Path(output_dir) / filename,
                 bands=bands,
                 size_arcsec=size_arcsec,
+                save_fits=save_fits,
+                fits_output_dir=fits_output_dir,
             )
             output.at[index, "cutout_status"] = "generated" if path else "no_coadd_at_position"
             output.at[index, "cutout_path"] = str(path) if path else ""
@@ -1105,7 +1163,7 @@ def enrich_reference_catalog_coadds(
     )
     output_dir = Path(config.output_dir) / _safe_name(config.name)
     output_dir.mkdir(parents=True, exist_ok=True)
-    result.to_csv(output_dir / "reference_catalog.csv", index=False)
+    _catalog_without_cutout_columns(result).to_csv(output_dir / "reference_catalog.csv", index=False)
     result.loc[result["cutout_eligible"]].sort_values("cutout_priority_rank").to_csv(output_dir / "cutout_plan.csv", index=False)
     return result
 
@@ -1116,6 +1174,7 @@ def generate_reference_catalog_cutouts(
     *,
     butler: Any = None,
     reuse_existing: bool | None = None,
+    save_fits: bool | None = None,
 ) -> pd.DataFrame:
     """Generate prioritized coadd cutouts from an enriched reference catalog."""
     if not isinstance(config, ReferenceCatalogConfig):
@@ -1127,13 +1186,16 @@ def generate_reference_catalog_cutouts(
     output_dir = Path(config.output_dir) / _safe_name(config.name)
     if reuse_existing is None:
         reuse_existing = config.reuse_cache
+    if save_fits is None:
+        save_fits = config.save_cutout_fits
     result = generate_prioritized_cutouts(
         catalog, butler=butler, data_release=release,
         output_dir=output_dir / "cutouts", bands=config.cutout_bands,
         size_arcsec=config.cutout_size_arcsec, reuse_existing=bool(reuse_existing),
+        save_fits=bool(save_fits), fits_output_dir=output_dir / "cutouts",
         verbose=config.verbose,
     )
-    result.to_csv(output_dir / "reference_catalog.csv", index=False)
+    _catalog_without_cutout_columns(result).to_csv(output_dir / "reference_catalog.csv", index=False)
     return result
 
 def run_reference_catalog_preview(
@@ -1313,12 +1375,14 @@ def run_reference_catalog(
             bands=config.cutout_bands,
             size_arcsec=config.cutout_size_arcsec,
             reuse_existing=config.reuse_cache,
+            save_fits=config.save_cutout_fits,
+            fits_output_dir=cutout_dir,
             verbose=config.verbose,
         )
 
     catalog_path = output_dir / "reference_catalog.csv"
     cutout_plan_path = output_dir / "cutout_plan.csv"
-    catalog.to_csv(catalog_path, index=False)
+    _catalog_without_cutout_columns(catalog).to_csv(catalog_path, index=False)
     catalog.loc[catalog["cutout_eligible"]].sort_values("cutout_priority_rank").to_csv(
         cutout_plan_path, index=False
     )
