@@ -945,7 +945,13 @@ def save_coadd_cutout_grid(
             hdu.header["SIZE_ARC"] = float(size_arcsec)
             hdu.header["PIXSCALE"] = float(pixel_scale)
             try:
-                hdu.header.extend(coadd.fits_wcs.to_header(), update=True)
+                wcs_header = coadd.fits_wcs.to_header()
+                # Shift the parent coadd reference pixel into the cutout frame.
+                if "CRPIX1" in wcs_header:
+                    wcs_header["CRPIX1"] -= float(x0)
+                if "CRPIX2" in wcs_header:
+                    wcs_header["CRPIX2"] -= float(y0)
+                hdu.header.extend(wcs_header, update=True)
             except Exception:
                 pass
             hdu.writeto(fits_path, overwrite=True)
