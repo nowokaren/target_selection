@@ -416,13 +416,18 @@ def query_visit_summary_by_band(
             [release.name, tile_nside, tile, search_radius_deg], separators=(",", ":")
         )
         cache_key = hashlib.sha256(cache_payload.encode()).hexdigest()[:16]
-        cache_file = cache_path / f"detectors_{tile}_{cache_key}.csv" if cache_path else None
+        cache_file = cache_path / f"detectors_{tile}_{cache_key}.csv.gz" if cache_path else None
+        legacy_cache_file = cache_path / f"detectors_{tile}_{cache_key}.csv" if cache_path else None
         state = "queried"
         error = ""
         try:
             if reuse_cache and cache_file is not None and cache_file.exists():
                 detector_rows = pd.read_csv(cache_file)
                 state = "cache"
+            elif reuse_cache and legacy_cache_file is not None and legacy_cache_file.exists():
+                # Read legacy uncompressed caches once; new writes always use gzip.
+                detector_rows = pd.read_csv(legacy_cache_file)
+                state = "cache_legacy"
             else:
                 query = f"""
                     SELECT vd.{c['band']} AS band,
@@ -458,7 +463,7 @@ def query_visit_summary_by_band(
                         detector_rows[column] = pd.NA
                 detector_rows = detector_rows[raw_columns]
                 if cache_file is not None:
-                    detector_rows.to_csv(cache_file, index=False)
+                    detector_rows.to_csv(cache_file, index=False, compression="gzip")
             matches = _match_targets_to_detector_rows(
                 tile_targets, detector_rows, search_radius_deg
             )

@@ -40,7 +40,8 @@ The workflow does not issue one TAP query per target for VisitDetector coverage.
    of any property map.
 3. Optional consolidated HealSparse coadd-property maps are sampled only at
    direct coadd matches, using HTTP range reads of the required coverage pixels.
-4. Tiles, direct coadd results, and map samples are cached independently. Only
+4. Tiles are cached as gzip-compressed CSV files (`.csv.gz`), while direct coadd
+   results and map samples are cached independently. Only
    the highest-priority targets within the configured cutout budget cause full
    coadd images to be retrieved from Butler.
 
@@ -99,10 +100,11 @@ outputs/catalog_enrichment/<name>/
 ```
 
 For a small test, use `run_reference_catalog_preview(config, n_targets=200)`
-from Python or set `TRIAL_TARGET_LIMIT = 200` in the notebook. For the complete
-35,400-row run, set `TRIAL_TARGET_LIMIT = None`, `RUN_CATALOG = True`, and keep
-`tap_max_workers = 2` unless the RSP service permits a larger value. Progress is
-shown by `tqdm` for VisitDetector tiles and cutouts.
+from Python or set `TARGET_LIMIT = 200` in the notebook. For the complete
+35,400-row run, set `TARGET_LIMIT = None`, run coverage and direct coadd
+detection first, and keep cutouts disabled until the desired subset is known.
+Keep `tap_max_workers = 2` unless the RSP service permits a larger value.
+Progress is shown by `tqdm` for VisitDetector tiles and cutouts.
 
 The input LaStBeRu file is local scientific data and is not committed to Git.
 Set `input_path` to any accessible CSV and configure its identifier, RA, Dec,
