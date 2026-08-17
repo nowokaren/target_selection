@@ -964,6 +964,16 @@ def run_target_selection(
     else:
         visible_summary = pd.DataFrame(columns=["Target", "RA_deg", "Dec_deg"])
         visible_summary.to_csv(summary_path, index=False)
+    if verbose and include_mop_visible_targets and not visible_summary.empty:
+        status_column = "mop_photometry_status"
+        error_column = "mop_photometry_error"
+        if status_column in visible_summary:
+            unavailable = visible_summary.loc[
+                visible_summary[status_column].astype(str).str.casefold().isin({"unavailable", "empty"})
+            ]
+            for row in unavailable.itertuples(index=False):
+                reason = getattr(row, error_column, "no usable measurements") if error_column in visible_summary else "no usable measurements"
+                print(f"      Photometry skipped for {getattr(row, 'Target', '<unknown>')}: {reason}", flush=True)
     visible_summary, excluded_summary = _filter_invalid_mop_magnitudes(visible_summary, max_current_magnitude)
     if excluded_summary and verbose and not excluded_daily:
         print(f"      Excluded {excluded_summary} MOP summary target(s) with mag_now <= 0", flush=True)

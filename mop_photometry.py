@@ -11,6 +11,28 @@ def _safe_target_name(value: object) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value)).strip("._")
 
 
+def normalize_photometry_provenance(data: pd.DataFrame, *, provider: str = "MOP") -> pd.DataFrame:
+    """Normalize provenance while retaining survey and provider information."""
+    if data is None:
+        return pd.DataFrame()
+    result = data.copy()
+    for column in ("Telescope", "Source", "Provider", "Collection"):
+        if column not in result:
+            result[column] = ""
+    telescope = result["Telescope"].fillna("").astype(str).str.strip()
+    source = result["Source"].fillna("").astype(str).str.strip()
+    result.loc[telescope.eq(""), "Telescope"] = source.loc[telescope.eq("")]
+    result["Provider"] = result["Provider"].fillna("").astype(str).str.strip()
+    result.loc[result["Provider"].eq(""), "Provider"] = str(provider)
+    return result
+
+
+def _valid_photometry(data: pd.DataFrame) -> bool:
+    if data is None or data.empty or not {"Timestamp", "Magnitude"}.issubset(data.columns):
+        return False
+    return bool(pd.to_datetime(data["Timestamp"], errors="coerce").notna().any() and pd.to_numeric(data["Magnitude"], errors="coerce").notna().any())
+
+
 def load_event_photometry(target, *, mop, cache_dir, refresh=False, legacy_cache_dir=None):
     """Fetch MOP photometry by name, with a positional fallback and CSV cache.
 
@@ -23,23 +45,47 @@ def load_event_photometry(target, *, mop, cache_dir, refresh=False, legacy_cache
     target_name = target.get("Target") if is_row else str(target)
     path = cache_dir / f"{_safe_target_name(target_name)}.csv"
     if path.exists() and not refresh:
-        return pd.read_csv(path, parse_dates=["Timestamp"])
+        try:
+            data = normalize_photometry_provenance(pd.read_csv(path, parse_dates=["Timestamp"]))
+        except (OSError, ValueError) as exc:
+            print(f"Photometry skipped for {target_name}: invalid cache ({exc})")
+            path.unlink(missing_ok=True)
+            data = pd.DataFrame()
+        if _valid_photometry(data):
+            data.to_csv(path, index=False)
+            return data
+        print(f"Photometry skipped for {target_name}: cached file has no usable measurements")
+        path.unlink(missing_ok=True)
     if legacy_cache_dir is not None and not refresh:
         legacy_path = Path(legacy_cache_dir) / path.name
         if legacy_path.exists():
-            data = pd.read_csv(legacy_path, parse_dates=["Timestamp"])
+            data = normalize_photometry_provenance(pd.read_csv(legacy_path, parse_dates=["Timestamp"]))
+            if _valid_photometry(data):
+                data.to_csv(path, index=False)
+                return data
+            print(f"Photometry skipped for {target_name}: legacy file has no usable measurements")
+    try:
+        data = normalize_photometry_provenance(mop.photometry(target_name), provider="MOP")
+        if _valid_photometry(data):
             data.to_csv(path, index=False)
             return data
-    try:
-        return mop.photometry(target_name, save_path=path)
+        raise ValueError("MOP returned no usable photometric measurements")
     except Exception as name_error:
         if is_row and target.get("RA") is not None and target.get("Dec") is not None:
             try:
-                return mop.photometry(ra=target["RA"], dec=target["Dec"], save_path=path)
+                data = normalize_photometry_provenance(
+                    mop.photometry(ra=target["RA"], dec=target["Dec"]), provider="MOP"
+                )
+                if _valid_photometry(data):
+                    data.to_csv(path, index=False)
+                    return data
+                raise ValueError("MOP returned no usable photometric measurements at the target coordinates")
             except Exception as position_error:
                 name_error = position_error
         result = pd.DataFrame()
+        path.unlink(missing_ok=True)
         result.attrs["error"] = str(name_error)
+        print(f"Photometry skipped for {target_name}: {name_error}")
 
         return result
 

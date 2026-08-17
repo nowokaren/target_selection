@@ -2,7 +2,7 @@ import pandas as pd
 
 from mop_photometry import (
     prepare_lightcurve_data, select_lightcurve_filters,
-    split_mop_candidates_without_event_data,
+    split_mop_candidates_without_event_data, normalize_photometry_provenance, load_event_photometry,
 )
 
 
@@ -46,3 +46,23 @@ def test_mop_visible_candidates_without_event_data_are_excluded(tmp_path):
     )
     assert set(included["Target"]) == {"parameters_only", "photometry_only", "followup_only"}
     assert included.set_index("Target").loc["photometry_only", "mop_photometry_points"] == 1
+
+
+def test_empty_fetch_is_reported_and_not_cached(tmp_path, capsys):
+    class EmptyMop:
+        def photometry(self, *args, **kwargs):
+            return pd.DataFrame(columns=["Timestamp", "Magnitude", "Source"])
+
+    result = load_event_photometry("empty-target", mop=EmptyMop(), cache_dir=tmp_path)
+    assert result.empty
+    assert not (tmp_path / "empty-target.csv").exists()
+    assert "Photometry skipped for empty-target" in capsys.readouterr().out
+
+
+def test_mop_provenance_fills_telescope_from_survey():
+    result = normalize_photometry_provenance(pd.DataFrame({
+        "Telescope": [""], "Source": ["OGLE"], "Timestamp": ["2025-01-01"],
+        "Magnitude": [17.0],
+    }))
+    assert result.loc[0, "Telescope"] == "OGLE"
+    assert result.loc[0, "Provider"] == "MOP"

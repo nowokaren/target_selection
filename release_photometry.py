@@ -27,7 +27,7 @@ FORCED_PHOTOMETRY_COLUMNS = [
     "direct_flux_njy", "direct_flux_err_njy",
     "direct_flux_flag", "difference_flux_njy", "difference_flux_err_njy",
     "difference_flux_flag", "tract", "patch", "coadd_epoch_mjd",
-    "epoch_definition",
+    "epoch_definition", "Telescope", "Provider", "Source", "Collection",
 ]
 FORCED_PHOTOMETRY_VERSION = 6
 
@@ -108,6 +108,10 @@ def _make_forced_measurement_task():
 def _base_record(request: pd.Series, dataset_type: str, **values) -> dict:
     record = {column: np.nan for column in FORCED_PHOTOMETRY_COLUMNS}
     record.update({
+        "Telescope": "LSST",
+        "Provider": "LSST",
+        "Source": "LSST",
+        "Collection": "",
         "Target": str(request["Target"]),
         "RA_deg": float(request["RA_deg"]),
         "Dec_deg": float(request["Dec_deg"]),
@@ -256,6 +260,10 @@ def compute_release_forced_photometry(
     result = pd.DataFrame(results, columns=FORCED_PHOTOMETRY_COLUMNS)
     result["data_release"] = data_release.name
     result["butler_collection"] = str(data_release.butler_collections)
+    result["Telescope"] = f"LSST-{data_release.name}"
+    result["Provider"] = "LSST"
+    result["Source"] = f"LSST-{data_release.name}"
+    result["Collection"] = str(data_release.butler_collections)
     result["measurement_method"] = "calexp_forced"
     return result.sort_values(["Target", "expMidptMJD", "visitId", "detector"], na_position="last").reset_index(drop=True)
 
@@ -352,6 +360,10 @@ def compute_coadd_forced_photometry(
         frame = pd.DataFrame(target_records, columns=FORCED_PHOTOMETRY_COLUMNS)
         frame["data_release"] = data_release.name
         frame["butler_collection"] = str(data_release.butler_collections)
+        frame["Telescope"] = f"LSST-{data_release.name}"
+        frame["Provider"] = "LSST"
+        frame["Source"] = f"LSST-{data_release.name}"
+        frame["Collection"] = str(data_release.butler_collections)
         frame["measurement_method"] = "coadd_forced"
         if on_target_result is not None:
             on_target_result(frame)
