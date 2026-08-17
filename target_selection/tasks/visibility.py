@@ -24,8 +24,11 @@ def evaluate_visibility(
     time_step_minutes: int = 1,
     observing_windows=None,
     output_path: str | Path | None = None,
+    verbose: bool = True,
 ) -> pd.DataFrame:
     """Task: evaluate local visibility for all target-night rows."""
+    if verbose:
+        print(f"[visibility] Evaluating {len(targets)} targets from {start_date} to {end_date or start_date}.", flush=True)
     end_date = end_date or start_date
     target_rows = targets.copy()
     if "observation_date" not in target_rows:
@@ -49,6 +52,9 @@ def evaluate_visibility(
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         selection.to_csv(path, index=False)
+    if verbose:
+        selected = int(selection.get("selected_for_visibility", pd.Series(dtype=bool)).astype(bool).sum())
+        print(f"[visibility] Rows: {len(selection)}; selected: {selected}.", flush=True)
     return selection
 
 

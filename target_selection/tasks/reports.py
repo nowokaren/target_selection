@@ -31,6 +31,7 @@ def create_target_report(
     butler=None,
     tap_service=None,
     overwrite: bool = True,
+    verbose: bool = True,
 ) -> Path:
     """Task: create or update one target dashboard PNG."""
     from target_report import plot_target
@@ -44,9 +45,13 @@ def create_target_report(
             raise ValueError("target DataFrame must contain exactly one row")
         target = target.iloc[0]
     target_name = str(target["Target"])
+    if verbose:
+        print(f"[reports] Building target report: {target_name}", flush=True)
     out = Path(output_dir) / f"{safe_name(target_name)}_target_report.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists() and not overwrite:
+        if verbose:
+            print(f"[reports] Reused existing report: {out}", flush=True)
         return out
     target_coverage = coverage if coverage is not None else pd.DataFrame()
     if not target_coverage.empty and "Target" in target_coverage:
@@ -70,6 +75,8 @@ def create_target_report(
         raise RuntimeError(f"No coadd covers target {target_name!r}")
     figure.savefig(out, dpi=150, bbox_inches="tight")
     plt.close(figure)
+    if verbose:
+        print(f"[reports] Report saved: {out}", flush=True)
     return out
 
 
@@ -87,7 +94,13 @@ def create_target_reports(
         wanted = set(str(name) for name in target_names)
         targets = targets.loc[targets["Target"].astype(str).isin(wanted)].copy()
     paths: list[Path] = []
-    for _, row in targets.iterrows():
+    print(f"[reports] Creating {len(targets)} target report(s).", flush=True)
+    try:
+        from tqdm.auto import tqdm
+        rows = tqdm(list(targets.iterrows()), desc="Target reports", unit="target")
+    except ImportError:
+        rows = targets.iterrows()
+    for _, row in rows:
         paths.append(
             create_target_report(
                 row,
@@ -97,6 +110,7 @@ def create_target_reports(
                 **kwargs,
             )
         )
+    print(f"[reports] Reports generated/reused: {len(paths)}", flush=True)
     return paths
 
 
@@ -110,8 +124,11 @@ def create_lightcurves_report(
     data_release: str = "DP2",
     layers=None,
     plots_per_page: int = 3,
+    verbose: bool = True,
 ) -> Path:
     """Task: create a multi-target light-curves PDF."""
+    if verbose:
+        print(f"[reports] Creating light-curves report for {len(targets)} targets.", flush=True)
     from monitoring_report import create_monitoring_report
 
     output = Path(output_path)
@@ -127,4 +144,6 @@ def create_lightcurves_report(
         layers=layers,
         plots_per_page=plots_per_page,
     )
+    if verbose:
+        print(f"[reports] Light-curves PDF saved: {output}", flush=True)
     return output

@@ -17,8 +17,11 @@ def query_lsst_coverage(
     search_radius: float = 11 / 60,
     max_workers: int = 4,
     output_path: str | Path | None = None,
+    verbose: bool = True,
 ) -> pd.DataFrame:
     """Task: query LSST/Rubin visit coverage for targets."""
+    if verbose:
+        print(f"[lsst] Querying {data_release} coverage for {len(targets)} targets.", flush=True)
     coverage = lsst_source.query_visit_coverage(
         targets,
         tap_service=tap_service,
@@ -30,6 +33,9 @@ def query_lsst_coverage(
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         coverage.to_csv(path, index=False)
+    if verbose:
+        n_targets = coverage["Target"].nunique() if "Target" in coverage else 0
+        print(f"[lsst] Coverage rows: {len(coverage)} ({n_targets} targets).", flush=True)
     return coverage
 
 
@@ -57,6 +63,8 @@ def compute_lsst_photometry(
         max_workers=max_workers,
         verbose=verbose,
     )
+    if verbose:
+        print(f"[lsst] Photometry rows returned: {len(photometry)} using {method}.", flush=True)
     if output_path is not None:
         save_lsst_photometry(photometry, output_path)
     if persistent_target_dir is not None and not photometry.empty:
@@ -64,6 +72,9 @@ def compute_lsst_photometry(
     return photometry
 
 
-def save_lsst_photometry(photometry: pd.DataFrame, path: str | Path) -> Path:
+def save_lsst_photometry(photometry: pd.DataFrame, path: str | Path, *, verbose: bool = True) -> Path:
     """Task: save normalized LSST/Rubin photometry."""
-    return lsst_source.save_release_photometry(photometry, path)
+    result = lsst_source.save_release_photometry(photometry, path)
+    if verbose:
+        print(f"[lsst] Saved {len(photometry)} photometry rows to {result}.", flush=True)
+    return result

@@ -21,8 +21,11 @@ def collect_mop_targets(
     cache_dir: str | Path = "outputs",
     max_workers: int = 4,
     refresh: bool = False,
+    verbose: bool = True,
 ) -> pd.DataFrame:
     """Collect MOP visible targets and optionally enrich parameters/photometry."""
+    if verbose:
+        print(f"[targets] Querying MOP visibility for {start_date} to {end_date or start_date}.", flush=True)
     if mop is None:
         from target_selection.sources.mop import create_client
         mop = create_client()
@@ -37,6 +40,8 @@ def collect_mop_targets(
         targets = _normalize_targets(daily, "mop") if not daily.empty else daily
         if not targets.empty:
             targets["is_mop_visible_in_run"] = True
+        if verbose:
+            print(f"[targets] MOP targets collected: {len(targets)}", flush=True)
         return targets
     cache = Path(cache_dir)
     summary = mop.visibility_summary(
@@ -53,18 +58,28 @@ def collect_mop_targets(
     ).assign(target_source="mop", is_mop_visible_in_run=True)
     from target_selection.sources.mop import apply_authoritative_coordinates
 
-    return apply_authoritative_coordinates(summary)
+    result = apply_authoritative_coordinates(summary)
+    if verbose:
+        print(f"[targets] MOP targets with event data: {len(result)}", flush=True)
+    return result
 
 
-def load_target_list(path: str | Path, *, source_name: str = "user_targets", column_map: Mapping[str, str] | None = None) -> pd.DataFrame:
+def load_target_list(path: str | Path, *, source_name: str = "user_targets", column_map: Mapping[str, str] | None = None, verbose: bool = True) -> pd.DataFrame:
     """Load and normalize a user-provided target CSV."""
-    return _normalize_targets(pd.read_csv(path), source_name, column_map=column_map)
+    if verbose:
+        print(f"[targets] Loading {source_name} targets from {path}.", flush=True)
+    result = _normalize_targets(pd.read_csv(path), source_name, column_map=column_map)
+    if verbose:
+        print(f"[targets] Normalized targets: {len(result)}", flush=True)
+    return result
 
 
-def merge_targets(*tables: pd.DataFrame) -> pd.DataFrame:
+def merge_targets(*tables: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
     """Merge target tables by canonical name, keeping highest coordinate priority."""
     usable = [table.copy() for table in tables if table is not None and not table.empty]
     if not usable:
+        if verbose:
+            print("[targets] No non-empty target tables to merge.", flush=True)
         return pd.DataFrame(columns=["Target", "RA_deg", "Dec_deg"])
     merged = pd.concat(usable, ignore_index=True, sort=False)
     merged["target_key"] = merged["Target"].map(canonical_target_name)
@@ -90,13 +105,22 @@ def merge_targets(*tables: pd.DataFrame) -> pd.DataFrame:
     ).drop_duplicates("target_key", keep="first")
     if not sources.empty:
         merged["input_sources"] = merged["target_key"].map(sources)
-    return merged.drop(columns=["target_key", "_input_order", "_coordinate_rank"]).reset_index(drop=True)
+    result = merged.drop(columns=["target_key", "_input_order", "_coordinate_rank"]).reset_index(drop=True)
+    if verbose:
+        print(f"[targets] Merged unique targets: {len(result)}", flush=True)
+    return result
 
 
-def restrict_targets(targets: pd.DataFrame, target_names: Iterable[str] | None) -> pd.DataFrame:
+def restrict_targets(targets: pd.DataFrame, target_names: Iterable[str] | None, *, verbose: bool = True) -> pd.DataFrame:
     """Return only requested targets, preserving input order."""
     if target_names is None:
-        return targets.copy()
+        result = targets.copy()
+        if verbose:
+            print(f"[targets] No target restriction; using {len(result)} targets.", flush=True)
+        return result
     wanted = {canonical_target_name(name) for name in target_names}
     keys = targets["Target"].map(canonical_target_name)
-    return targets.loc[keys.isin(wanted)].copy().reset_index(drop=True)
+    result = targets.loc[keys.isin(wanted)].copy().reset_index(drop=True)
+    if verbose:
+        print(f"[targets] Restriction kept {len(result)}/{len(targets)} targets.", flush=True)
+    return result

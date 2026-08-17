@@ -96,12 +96,13 @@ def run_target_selection_tasks(
                 mop=mop,
                 cache_dir=output_dir,
                 max_workers=max_workers,
+                verbose=verbose,
             )
         )
     if target_csv is not None:
         if verbose:
             print(f"[targets] user CSV: {target_csv}", flush=True)
-        target_tables.append(load_target_list(target_csv, column_map=target_csv_column_map))
+        target_tables.append(load_target_list(target_csv, column_map=target_csv_column_map, verbose=verbose))
     if hsh_inventory is not None:
         if verbose:
             print(f"[surveys] import HSH inventory: {hsh_inventory}", flush=True)
@@ -120,8 +121,10 @@ def run_target_selection_tasks(
             )
         )
 
-    targets = merge_targets(*target_tables)
-    targets = restrict_targets(targets, target_names)
+    targets = merge_targets(*target_tables, verbose=verbose)
+    targets = restrict_targets(targets, target_names, verbose=verbose)
+    if verbose:
+        print(f"[pipeline] Final target count: {len(targets)}", flush=True)
     result.targets = targets
     paths["tables"].mkdir(parents=True, exist_ok=True)
     targets.to_csv(paths["tables"] / "targets.csv", index=False)
@@ -167,6 +170,7 @@ def run_target_selection_tasks(
                 minimum_observable_minutes=minimum_observable_minutes,
                 time_step_minutes=time_step_minutes,
                 observing_windows=observing_windows,
+                start_date=start_date, end_date=end_date,
             )
 
     if query_coverage and not targets.empty:
@@ -215,4 +219,10 @@ def run_target_selection_tasks(
             overwrite=overwrite_products,
         )
 
+    if verbose:
+        print(
+            f"[pipeline] Finished: {len(result.targets)} targets, "
+            f"{len(result.visibility)} visibility rows, {len(result.coverage)} coverage rows, "
+            f"{len(result.lsst_photometry)} photometry rows.", flush=True
+        )
     return result
