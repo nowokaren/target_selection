@@ -47,7 +47,19 @@ def normalize_columns(
     """
     normalized = data.copy()
     canonical = set(aliases.values())
-    explicit = dict(column_map or {})
+    raw_map = dict(column_map or {})
+    canonical_by_lower = {str(value).casefold(): value for value in canonical}
+    explicit: dict[str, str] = {}
+    for key, value in raw_map.items():
+        key, value = str(key), str(value)
+        # Accept both documented forms: input -> canonical, and the
+        # convenient canonical -> input form used in interactive notebooks.
+        if value.casefold() in canonical_by_lower and key in normalized.columns:
+            explicit[key] = canonical_by_lower[value.casefold()]
+        elif key.casefold() in canonical_by_lower and value in normalized.columns:
+            explicit[value] = canonical_by_lower[key.casefold()]
+        else:
+            explicit[key] = value
     invalid = sorted({str(value) for value in explicit.values()} - canonical)
     if invalid:
         raise ValueError(
