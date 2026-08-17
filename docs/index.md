@@ -49,3 +49,4 @@ lists the most useful products that actually exist for that run.
 - [Data and cache](data-and-cache.md): understand what is persistent and what
   belongs only to one run.
 - [Products](products.md): find every recommended table, plot, and PDF.
+- [Architecture proposal](architecture_restructure_proposal.md): proposed source-capability and task-based refactor; the PDF version is [target_selection_architecture_proposal.pdf](target_selection_architecture_proposal.pdf).

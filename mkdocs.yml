@@ -23,6 +23,7 @@ nav:
   - Python and CLI API: api.md
   - Extending the tool:
       - Architecture: architecture.md
+      - Architecture proposal: architecture_restructure_proposal.md
       - Adding a source: adding_sources.md
   - Publish on Read the Docs: publishing.md
 
