@@ -104,18 +104,28 @@ def current_flow(pdf):
 
 def source_model(pdf):
     fig, ax = page("Proposed Source Model")
-    box(ax, (0.39, 0.78), (0.22, 0.09), "SourceDefinition", BLUE, 11)
-    left = [("TargetProvider\nMOP, OMP, CSV", 0.08), ("FollowupSurvey\nHSH, JS", 0.30), ("ReferenceSurvey\nDP1, DP2", 0.52), ("PhotometryProvider\nOGLE, Gaia, ZTF", 0.74)]
-    for text, x in left:
-        box(ax, (x, 0.58), (0.16, 0.10), text, GREEN, 9.2)
-        arrow(ax, (0.50, 0.78), (x + 0.08, 0.68))
-    caps = ["targets", "event\nparameters", "coverage", "epochs", "photometry", "light curves", "images", "coadds", "cutouts"]
-    for i, cap in enumerate(caps):
-        x = 0.06 + (i % 5) * 0.18
-        y = 0.34 if i < 5 else 0.20
-        box(ax, (x, y), (0.13, 0.075), cap, YELLOW, 8.8)
-        arrow(ax, (0.50, 0.78), (x + 0.065, y + 0.075))
-    wrapped(ax, "Roles explain why a source participates. Capabilities explain what data it can provide. A source can have several capabilities, and tasks request capabilities instead of hard-coding provider names.", 0.07, 0.09, width=110, size=10)
+    box(ax, (0.38, 0.80), (0.24, 0.085), "DataSourceDefinition", BLUE, 11)
+
+    columns = [
+        ("Source kind", ["Survey / observing program\nHSH, JS, Rubin, ZTF, Gaia", "Event aggregator / broker\nMOP, OMP", "User target list / catalog\nCSV, LaStBeRu"], 0.06, GREEN),
+        ("Access mode", ["python_api / http_api", "tap_butler", "local_csv / local_files", "database"], 0.31, GRAY),
+        ("Capabilities", ["targets + parameters", "coverage + epochs", "photometry + objects", "images + coadds + cutouts"], 0.56, YELLOW),
+        ("Run usage", ["candidate input", "planning telescope", "context / comparison", "light-curve or dashboard source"], 0.79, RED),
+    ]
+
+    for title, items, x, color in columns:
+        box(ax, (x, 0.64), (0.16, 0.07), title, color, 9.8)
+        arrow(ax, (0.50, 0.80), (x + 0.08, 0.71))
+        y = 0.50
+        for item in items:
+            box(ax, (x, y), (0.16, 0.075), item, color, 7.8)
+            y -= 0.105
+
+    wrapped(
+        ax,
+        "Core change: reference/follow-up are not source classes. They describe how a survey is used in one run. The stable source definition is kind + access mode + capabilities; run usage is selected separately.",
+        0.07, 0.08, width=110, size=10,
+    )
     pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
 
@@ -175,15 +185,15 @@ def config_page(pdf):
     body = """
 Recommended config direction:
 
-1. Keep semantic source lists: target_providers, followup_surveys, reference_surveys, and optionally photometry_providers.
-2. Add source capabilities so tasks can request coverage, photometry, images, coadds, cutouts, or light curves without provider-specific branching.
+1. Define each data source once with kind, access mode, and capabilities.
+2. Select run usage separately: candidate_inputs, planning_surveys, context_surveys, photometry_sources, and image_sources.
 3. Keep selection settings independent: target_names, bands, magnitude cuts, visibility dates/windows, and data-availability requirements.
-4. Make tasks explicit: match, coverage, photometry, images, visibility, planning_summary, monitoring_report, target_dashboard.
+4. Make tasks explicit: match, coverage, photometry, images, visibility, planning_summary, lightcurves_report, target_dashboard.
 5. Keep product switches as the user-facing output layer, but allow tags such as product:target-report or photometry:dia to map to task groups.
 
 Useful tags:
 
-targets:mop-visible, targets:followup-observed, targets:user-list, targets:subset, match:catalog, visibility:local, coverage:survey, photometry:mop, photometry:dia, photometry:coadd-forced, images:coadd, images:cutout, product:dashboard, product:lightcurves, product:planning-table, product:visibility-plots.
+source:survey, source:aggregator, source:local-csv, targets:mop-visible, targets:observed, targets:user-list, targets:subset, match:catalog, visibility:local, coverage:survey, photometry:mop, photometry:survey, photometry:dia, photometry:coadd-forced, images:coadd, images:cutout, product:dashboard, product:lightcurves, product:planning-table, product:visibility-plots.
 """
     text_page(pdf, "Configuration and Functional Tags", body)
 
@@ -193,12 +203,13 @@ def refactor_page(pdf):
 Recommended refactor path:
 
 1. Preserve run_analysis(config), the CLI, and the notebook workflow.
-2. Define capability protocols: TargetProvider, EventDataProvider, CoverageProvider, PhotometryProvider, ImageProvider, and CutoutProvider.
-3. Split target_selection_pipeline.py into task modules for coverage, photometry, images, dashboards, summaries, and run assembly.
-4. Promote MOP enrichment and photometry into provider capabilities, so MOP can be used for enrichment even when its daily visible target list is not selected.
-5. Store match results and reference photometry in the registry with source, method, collection, counterpart ID, separation, status, and version.
-6. Keep old product keywords as compatibility aliases while adding task/product groups.
-7. Keep target reports in a shared target_reports/ folder and update reports by target name.
+2. Define normalized source interfaces around kind, access mode, and capabilities. Do not make reference/follow-up separate source classes.
+3. Define capability protocols: TargetProvider, EventDataProvider, CoverageProvider, EpochProvider, PhotometryProvider, ObjectCatalogProvider, ImageProvider, and CutoutProvider.
+4. Split target_selection_pipeline.py into task modules for coverage, photometry, images, dashboards, summaries, and run assembly.
+5. Promote MOP enrichment and photometry into provider capabilities, so MOP can be used for enrichment even when its daily visible target list is not selected.
+6. Store match results and reference photometry in the registry with source, method, collection, counterpart ID, separation, status, and version.
+7. Keep old product keywords as compatibility aliases while adding task/product groups.
+8. Keep target reports in a shared target_reports/ folder and update reports by target name.
 
 Do not rewrite everything at once. The current architecture is usable. The next changes should isolate the monolithic Rubin/product backend first, because that is where most complexity is concentrated.
 """
@@ -211,7 +222,7 @@ def main():
         text_page(
             pdf,
             "Target Selection Architecture Proposal",
-            "This PDF describes the current organization of target_selection and proposes an incremental architecture that is easier to extend to MOP, OMP, HSH, JS, Rubin DP1/DP2, OGLE, Gaia, ZTF, and future sources. The central recommendation is to keep semantic source roles, add explicit data capabilities, and split the monolithic scientific backend into composable tasks.",
+            "This PDF describes the current organization of target_selection and proposes an incremental architecture that is easier to extend to MOP, OMP, HSH, JS, Rubin DP1/DP2, OGLE, Gaia, ZTF, local CSVs, and future sources. The central recommendation is to define sources by kind, access mode, and capabilities, then choose their run usage explicitly.",
         )
         current_flow(pdf)
         source_model(pdf)
