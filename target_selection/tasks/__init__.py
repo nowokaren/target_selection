@@ -5,7 +5,7 @@ scripts when direct Python variables are more convenient than a full config
 file.
 """
 
-from .targets import collect_mop_targets, load_target_list, merge_targets
+from .targets import collect_mop_targets, load_target_list, merge_targets, restrict_targets
 from .surveys import import_hsh_inventory, observed_targets
 from .visibility import evaluate_visibility, save_visibility_plots, make_visibility_sequence
 from .lsst import query_lsst_coverage, compute_lsst_photometry, save_lsst_photometry
@@ -18,6 +18,7 @@ __all__ = [
     "collect_mop_targets",
     "load_target_list",
     "merge_targets",
+    "restrict_targets",
     "evaluate_visibility",
     "save_visibility_plots",
     "make_visibility_sequence",
