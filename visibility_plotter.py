@@ -1089,12 +1089,17 @@ def save_nightly_visibility_plots(
     config_changed = previous_config != json.loads(json.dumps(visibility_config, default=str))
     effective_overwrite = overwrite or config_changed
     dates = pd.date_range(start_date, end_date, freq="D")
-    selection = selection.copy() if selection is not None else build_visibility_selection(
-        daily_targets, start_date, end_date, observatory=observatory,
-        minimum_altitude=minimum_altitude,
-        minimum_observable_minutes=minimum_observable_minutes,
-        time_step_minutes=time_step_minutes, observing_windows=observing_windows,
-    )
+    if selection is None or (selection.empty and not daily_targets.empty):
+        if verbose:
+            print("      Visibility selection was empty; recomputing it from the supplied targets.", flush=True)
+        selection = build_visibility_selection(
+            daily_targets, start_date, end_date, observatory=observatory,
+            minimum_altitude=minimum_altitude,
+            minimum_observable_minutes=minimum_observable_minutes,
+            time_step_minutes=time_step_minutes, observing_windows=observing_windows,
+        )
+    else:
+        selection = selection.copy()
     paths = []
     for index, night in enumerate(dates, start=1):
         night_string = night.date().isoformat()
