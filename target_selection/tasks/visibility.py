@@ -107,6 +107,8 @@ def make_visibility_sequence(
     time_step_minutes: int = 1,
     observing_windows=None,
     output_format: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> Path:
     """Task: stack selected nightly visibility panels into one PDF/PNG."""
     output = Path(output_path)
@@ -120,4 +122,6 @@ def make_visibility_sequence(
         time_step_minutes=time_step_minutes,
         observing_windows=observing_windows,
         output_format=output_format,
+        start_date=start_date,
+        end_date=end_date,
     )

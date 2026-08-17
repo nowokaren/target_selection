@@ -782,8 +782,14 @@ def plot_visibility_sequence(
     x_reference_every: int = 4,
     output_format: str | None = None,
     observing_windows=None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> Path:
-    """Stack chronologically ordered nightly visibility panels in one figure."""
+    """Stack chronologically ordered nightly visibility panels in one figure.
+
+    ``start_date``/``end_date`` allow an empty selection to still produce a
+    dated blank sequence, which is useful when no target passes the criterion.
+    """
     if date_column not in selected_targets:
         raise ValueError(f"Missing date column: {date_column}")
     if x_reference_every < 1:
@@ -795,8 +801,14 @@ def plot_visibility_sequence(
     data["_plot_date"] = pd.to_datetime(data[date_column], errors="coerce").dt.date
     data = data.dropna(subset=["_plot_date"])
     nights = sorted(data["_plot_date"].unique())
+    if not nights and start_date is not None:
+        final_date = end_date or start_date
+        nights = list(pd.date_range(start_date, final_date, freq="D").date)
     if not nights:
-        raise ValueError("No valid observing dates were found.")
+        raise ValueError(
+            f"No valid observing dates were found in {date_column!r}; "
+            "pass start_date/end_date when the selection is empty."
+        )
 
     output_path = Path(output_path)
     if output_format is None:
