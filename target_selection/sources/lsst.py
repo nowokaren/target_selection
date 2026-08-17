@@ -7,6 +7,7 @@ can still be imported outside the Rubin Science Platform.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Iterable
@@ -60,26 +61,69 @@ def query_visit_coverage(
     max_workers: int = 4,
 ) -> pd.DataFrame:
     """Query Rubin visit/detector coverage around each target position."""
-    from target_selection_pipeline import query_release_coverage
-
     release = get_data_release(data_release)
     tap_service = tap_service or create_tap_service(release)
-    return query_release_coverage(
-        targets,
-        tap_service=tap_service,
-        search_radius=search_radius,
-        max_workers=max_workers,
-        data_release=release,
-    )
+    columns = ["Target", "visitId", "expMidptMJD", "band", "detector"]
+
+    def query_one(values):
+        name, ra, dec = values
+        query = f"""
+            SELECT {release.visit_select("vd")}
+            FROM {release.tap_visit_table} AS vd
+            WHERE CONTAINS(
+                POINT('ICRS', vd.{release.tap_ra}, vd.{release.tap_dec}),
+                CIRCLE('ICRS', {ra}, {dec}, {search_radius})
+            ) = 1
+        """
+        job = tap_service.submit_job(query)
+        job.run()
+        job.wait(phases=["COMPLETED", "ERROR"])
+        if job.phase == "ERROR":
+            job.raise_if_error()
+        data = job.fetch_result().to_table().to_pandas().copy()
+        if not data.empty:
+            data = data.drop(columns="Target", errors="ignore")
+            data["Target"] = name
+        return data
+
+    values = [
+        (row.Target, float(row.RA_deg), float(row.Dec_deg))
+        for row in targets[["Target", "RA_deg", "Dec_deg"]].itertuples(index=False)
+    ]
+    workers = max(1, min(int(max_workers), len(values))) if values else 1
+    if workers == 1:
+        results = [query_one(value) for value in values]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            results = list(executor.map(query_one, values))
+    records = [data for data in results if not data.empty]
+    return pd.concat(records, ignore_index=True) if records else pd.DataFrame(columns=columns)
 
 
 def query_visit_centers(*, tap_service=None, data_release: str | DataReleaseConfig = "DP2") -> pd.DataFrame:
-    """Query approximate Rubin visit centers for coarse coverage maps."""
-    from target_selection_pipeline import query_release_visit_centers
-
+    """Query one approximate sky position per Rubin visit for coarse maps."""
     release = get_data_release(data_release)
     tap_service = tap_service or create_tap_service(release)
-    return query_release_visit_centers(tap_service=tap_service, data_release=release)
+    query = f"""
+        SELECT
+            vd.{release.visit_columns['visitId']} AS visitId,
+            AVG(vd.{release.tap_ra}) AS ra,
+            AVG(vd.{release.tap_dec}) AS dec
+        FROM {release.tap_visit_table} AS vd
+        GROUP BY vd.{release.visit_columns['visitId']}
+    """
+    job = tap_service.submit_job(query)
+    job.run()
+    job.wait(phases=["COMPLETED", "ERROR"])
+    if job.phase == "ERROR":
+        job.raise_if_error()
+    result = job.fetch_result().to_table().to_pandas()
+    result.columns = [str(column).lower() for column in result.columns]
+    expected = ["visitid", "ra", "dec"]
+    missing = [column for column in expected if column not in result]
+    if missing:
+        raise ValueError(f"Visit-center query is missing columns: {missing}")
+    return result[expected].rename(columns={"visitid": "visitId"})
 
 
 def compute_release_photometry(

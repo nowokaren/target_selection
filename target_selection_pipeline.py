@@ -30,9 +30,10 @@ TARGET_REPORT_VERSION = 13
 
 
 def _safe_name(value: object) -> str:
-    """Convert a target name into a safe directory/file component."""
-    text = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value)).strip("._")
-    return text or "unknown_target"
+    """Compatibility wrapper for :func:`target_selection.run_paths.safe_name`."""
+    from target_selection.run_paths import safe_name
+
+    return safe_name(value)
 
 
 def _load_additional_targets(targets: pd.DataFrame | str | Path | None) -> pd.DataFrame:
@@ -231,38 +232,10 @@ def _visibility_daily_targets(
 
 
 def _observing_window_slug(observing_windows=None) -> str:
-    """Build a readable, stable directory component for an observing schedule."""
-    def pair_label(value) -> str | None:
-        if isinstance(value, tuple) and len(value) == 2 and all(isinstance(item, str) for item in value):
-            return f"{value[0].replace(':', '-')}_to_{value[1].replace(':', '-')}"
-        if isinstance(value, list):
-            if len(value) == 2 and all(isinstance(item, str) for item in value):
-                return f"{value[0].replace(':', '-')}_to_{value[1].replace(':', '-')}"
-            pairs = []
-            for item in value:
-                if not isinstance(item, (tuple, list)) or len(item) != 2:
-                    return None
-                pairs.append(f"{str(item[0]).replace(':', '-')}_to_{str(item[1]).replace(':', '-')}")
-            return "_and_".join(pairs) if pairs else "none"
-        return None
+    """Compatibility wrapper for the package path helper."""
+    from target_selection.run_paths import observing_window_slug
 
-    if observing_windows is None:
-        schedule = "18-00_to_06-00"
-    elif isinstance(observing_windows, dict):
-        date_overrides = {key: value for key, value in observing_windows.items() if key != "default"}
-        default_schedule = pair_label(observing_windows.get("default"))
-        if not date_overrides and default_schedule is not None:
-            schedule = default_schedule
-        else:
-            prefix = default_schedule or "custom"
-            canonical = json.dumps(observing_windows, default=str, sort_keys=True, separators=(",", ":"))
-            schedule = f"{prefix}_varied-{hashlib.sha256(canonical.encode()).hexdigest()[:8]}"
-    else:
-        schedule = pair_label(observing_windows)
-        if schedule is None:
-            canonical = json.dumps(observing_windows, default=str, sort_keys=True, separators=(",", ":"))
-            schedule = f"custom-{hashlib.sha256(canonical.encode()).hexdigest()[:8]}"
-    return _safe_name(f"obs_{schedule}")
+    return observing_window_slug(observing_windows)
 
 
 def create_run_structure(
@@ -271,28 +244,13 @@ def create_run_structure(
     observing_windows=None,
     run_name: str = "",
 ) -> dict[str, Path]:
-    """Create and return the folders used by one analysis run."""
-    date_label = start_date if start_date == end_date else f"{start_date}_to_{end_date}"
-    label = f"{date_label}__{_observing_window_slug(observing_windows)}"
-    if str(run_name).strip():
-        label = f"{_safe_name(str(run_name))}_{label}"
-    release = get_data_release(data_release)
-    base_dir = Path(root_dir) if release.name == "DP2" else Path(root_dir) / _safe_name(release.name)
-    run_dir = base_dir / label
-    paths = {
-        "run": run_dir,
-        "tables": run_dir / "tables",
-        "sky_plots": run_dir / "sky_plots",
-        "visibility_plots": run_dir / "visibility_plots",
-        "monitoring_reports": run_dir / "monitoring_reports",
-        "target_reports": base_dir / "target_reports",
-        # Backward-compatible keys. Reports are flat files in the shared folder.
-        "targets": base_dir / "target_reports",
-        "targets_visibility_selected": base_dir / "target_reports",
-    }
-    for path in paths.values():
-        path.mkdir(parents=True, exist_ok=True)
-    return paths
+    """Compatibility wrapper for the package run-layout helper."""
+    from target_selection.run_paths import create_run_structure as _create
+
+    return _create(
+        root_dir, start_date, end_date, data_release=data_release,
+        observing_windows=observing_windows, run_name=run_name,
+    )
 
 
 def _coverage_cache_key(targets: pd.DataFrame, release: DataReleaseConfig) -> str:
@@ -316,77 +274,22 @@ def query_release_coverage(
     max_workers: int = 4,
     data_release: str | DataReleaseConfig = "DP2",
 ) -> pd.DataFrame:
-    """Query visit coverage using release-specific TAP names."""
-    release = get_data_release(data_release)
-    columns = ["Target", "visitId", "expMidptMJD", "band", "detector"]
+    """Compatibility wrapper for the dedicated Rubin source adapter."""
+    from target_selection.sources.lsst import query_visit_coverage
 
-    def query_one(values):
-        name, ra, dec = values
-        query = f"""
-            SELECT {release.visit_select("vd")}
-            FROM {release.tap_visit_table} AS vd
-            WHERE CONTAINS(
-                POINT('ICRS', vd.{release.tap_ra}, vd.{release.tap_dec}),
-                CIRCLE('ICRS', {ra}, {dec}, {search_radius})
-            ) = 1
-        """
-        job = tap_service.submit_job(query)
-        job.run()
-        job.wait(phases=["COMPLETED", "ERROR"])
-        if job.phase == "ERROR":
-            job.raise_if_error()
-        # Copy because TAP client result objects may reuse their backing table.
-        data = job.fetch_result().to_table().to_pandas().copy()
-        if not data.empty:
-            data = data.drop(columns="Target", errors="ignore")
-            data["Target"] = name
-        return data
-
-    values = [
-        (row.Target, float(row.RA_deg), float(row.Dec_deg))
-        for row in targets[["Target", "RA_deg", "Dec_deg"]].itertuples(index=False)
-    ]
-    workers = max(1, min(int(max_workers), len(values))) if values else 1
-    if workers == 1:
-        results = [query_one(value) for value in values]
-    else:
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            results = list(executor.map(query_one, values))
-    records = [data for data in results if not data.empty]
-    return pd.concat(records, ignore_index=True) if records else pd.DataFrame(columns=columns)
+    return query_visit_coverage(
+        targets, tap_service=tap_service, data_release=data_release,
+        search_radius=search_radius, max_workers=max_workers,
+    )
 
 
 def query_release_visit_centers(
-    tap_service,
-    data_release: str | DataReleaseConfig = "DP2",
+    tap_service, data_release: str | DataReleaseConfig = "DP2"
 ) -> pd.DataFrame:
-    """Return one approximate sky position per visit for coverage maps.
+    """Compatibility wrapper for the dedicated Rubin source adapter."""
+    from target_selection.sources.lsst import query_visit_centers
 
-    Detector centers are averaged server-side, reducing the release-wide table
-    to one row per visit before transfer. The result is intended for coarse
-    coverage visualization, not exact footprint calculations.
-    """
-    release = get_data_release(data_release)
-    query = f"""
-        SELECT
-            vd.{release.visit_columns['visitId']} AS visitId,
-            AVG(vd.{release.tap_ra}) AS ra,
-            AVG(vd.{release.tap_dec}) AS dec
-        FROM {release.tap_visit_table} AS vd
-        GROUP BY vd.{release.visit_columns['visitId']}
-    """
-    job = tap_service.submit_job(query)
-    job.run()
-    job.wait(phases=["COMPLETED", "ERROR"])
-    if job.phase == "ERROR":
-        job.raise_if_error()
-    result = job.fetch_result().to_table().to_pandas()
-    result.columns = [str(column).lower() for column in result.columns]
-    expected = ["visitid", "ra", "dec"]
-    missing = [column for column in expected if column not in result]
-    if missing:
-        raise ValueError(f"Visit-center query is missing columns: {missing}")
-    return result[expected].rename(columns={"visitid": "visitId"})
+    return query_visit_centers(tap_service=tap_service, data_release=data_release)
 
 
 def summarize_release_coverage(coverage_rows: pd.DataFrame) -> pd.DataFrame:
@@ -1044,24 +947,24 @@ def save_target_reports(
 
 
 def _create_mop_client():
+    """Create the legacy default MOP client lazily."""
     from mop_api import MOPClient
 
     return MOPClient()
 
 
 def _create_tap_service(release: DataReleaseConfig):
-    from lsst.rsp import RSPDiscovery
+    """Compatibility wrapper for :mod:`target_selection.sources.lsst`."""
+    from target_selection.sources.lsst import create_tap_service
 
-    return RSPDiscovery(release.rsp_instance).get_tap_client()
+    return create_tap_service(release)
 
 
 def _create_butler(release: DataReleaseConfig):
-    from lsst.daf.butler import Butler
+    """Compatibility wrapper for :mod:`target_selection.sources.lsst`."""
+    from target_selection.sources.lsst import create_butler
 
-    options = {}
-    if release.butler_collections is not None:
-        options["collections"] = release.butler_collections
-    return Butler(release.butler_repo, **options)
+    return create_butler(release)
 
 
 def _create_default_target_plotter(

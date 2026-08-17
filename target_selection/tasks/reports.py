@@ -34,7 +34,7 @@ def create_target_report(
 ) -> Path:
     """Task: create or update one target dashboard PNG."""
     from target_report import plot_target
-    from target_selection_pipeline import _safe_name
+    from target_selection.run_paths import safe_name
 
     release = get_data_release(data_release)
     butler = butler or create_butler(release)
@@ -44,7 +44,7 @@ def create_target_report(
             raise ValueError("target DataFrame must contain exactly one row")
         target = target.iloc[0]
     target_name = str(target["Target"])
-    out = Path(output_dir) / f"{_safe_name(target_name)}_target_report.png"
+    out = Path(output_dir) / f"{safe_name(target_name)}_target_report.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists() and not overwrite:
         return out

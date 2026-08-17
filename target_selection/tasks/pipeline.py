@@ -19,7 +19,7 @@ from target_selection.tasks.reports import create_lightcurves_report, create_tar
 from target_selection.tasks.targets import collect_mop_targets, load_target_list, merge_targets, restrict_targets
 from target_selection.tasks.surveys import import_hsh_inventory, observed_targets
 from target_selection.tasks.visibility import evaluate_visibility, make_visibility_sequence, save_visibility_plots
-from target_selection_pipeline import create_run_structure
+from target_selection.run_paths import create_run_structure
 
 
 @dataclass
