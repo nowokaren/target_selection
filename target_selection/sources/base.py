@@ -1,14 +1,56 @@
-"""Interfaces shared by target providers and observing surveys."""
+"""Source interfaces shared by task and config workflows.
+
+The preferred model is capability-oriented: a source has a kind, an access
+mode, and one or more capabilities.  The older role-specific protocols remain
+available for compatibility with the config-file workflow.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Protocol, runtime_checkable
+from typing import Any, Literal, Mapping, Protocol, runtime_checkable
 
 import pandas as pd
 
 from target_selection.config import AnalysisConfig, SourceSpec
+
+SourceKind = Literal["survey", "event_aggregator", "user_target_list", "local_inventory", "catalog"]
+AccessMode = Literal["python_api", "http_api", "tap_butler", "local_csv", "local_files", "database"]
+Capability = Literal[
+    "targets",
+    "event_parameters",
+    "coverage",
+    "epochs",
+    "photometry",
+    "objects",
+    "images",
+    "coadds",
+    "cutouts",
+    "astrometry",
+]
+
+
+@dataclass(frozen=True)
+class DataSourceDefinition:
+    """Normalized source description independent from run usage."""
+
+    name: str
+    kind: SourceKind
+    access: AccessMode
+    capabilities: tuple[Capability | str, ...] = ()
+    label: str | None = None
+    options: Mapping[str, Any] = field(default_factory=dict)
+
+
+@runtime_checkable
+class DataSourceAdapter(Protocol):
+    """Capability-oriented adapter base for new task modules."""
+
+    definition: DataSourceDefinition
+
+    def has_capability(self, capability: str) -> bool: ...
+
 
 
 @dataclass

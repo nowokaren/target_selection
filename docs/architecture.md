@@ -1,33 +1,50 @@
 # Architecture
 
-The architecture separates **scientific roles**, **data access**,
-**orchestration**, **persistence**, and **products**. This allows a new target
-provider or follow-up survey to be added without adding another provider-
-specific argument to the main function.
+The architecture separates **data-source definitions**, **data access**,
+**task execution**, **persistence**, and **products**. This allows a new survey,
+event aggregator, local inventory, or catalog to be added without adding
+another provider-specific argument to the main function.
 
 ## Core vocabulary
 
 | Term | Meaning | Example |
 |---|---|---|
-| Source role | Why a source participates in planning | `target_provider` |
-| Source definition | One named configuration entry | `target_providers.mop` |
-| Adapter | Python boundary that translates one source into normalized operations and tables | `MopTargetProvider` |
-| Capability | Descriptive metadata about data offered by a source | `targets`, `photometry` |
+| Source kind | What the source is | `survey`, `event_aggregator`, `user_target_list` |
+| Run usage | How a source is used in one run | candidate input, planning telescope, context survey |
+| Source definition | One named source entry | `sources.rubin_dp2`, `sources.mop` |
+| Adapter | Python boundary that translates one source into normalized operations and tables | MOP adapter, HSH CSV adapter, Rubin adapter |
+| Capability | Data offered by a source | `targets`, `coverage`, `photometry`, `images` |
 | Registry | Persistent SQLite catalog shared across runs | `TargetRegistry` |
-| Reference run | One target union enriched by one reference survey | `rubin_dp2` |
+| Task | One explicit operation called from Python | `query_lsst_coverage`, `evaluate_visibility` |
 | Product | A run-specific table, plot, PDF, or manifest | `product_index.json` |
 
-### The three source roles
+### Source kinds and run usage
 
-| Role | Purpose | Built-in adapter types | Current examples |
-|---|---|---|---|
-| Target provider | Supplies candidate events, parameters, or provider photometry | `mop`, `csv` | MOP, user lists, future OMP |
-| Follow-up survey | Represents the observing program being evaluated or planned | `hsh`, `csv` | CASLEO/HSH, CASLEO/JS |
-| Reference survey | Adds external coverage, images, catalogues, or photometry | `rubin` | Rubin DP1, DP2 |
+The core model is not `reference_survey` versus `followup_survey`. Those labels
+describe how a survey is used in a specific run. The stable definition is:
 
-A role is semantic, not a file format. MOP remains a target provider even
-though it also supplies event parameters and photometry. HSH remains a
-follow-up survey even after photometry is added.
+```text
+DataSource = source kind + access mode + capabilities
+Run usage  = why this source is selected for this run
+```
+
+| Source kind | Meaning | Examples |
+|---|---|---|
+| `survey` | Observing survey or observing program. It may be wide-field, alert-based, follow-up, or archival. | Rubin/LSST, ZTF, Gaia, OGLE, CASLEO/HSH, CASLEO/JS |
+| `event_aggregator` | System that aggregates or publishes candidate events from one or more surveys. | MOP, future OMP |
+| `user_target_list` | Local list of targets to analyze. | CSV with name, RA, Dec |
+| `local_inventory` | Local image/observation inventory for a survey. | HSH `image_collection_astro.csv`, future JS inventory |
+| `catalog` | Static external catalog used for matching or enrichment. | LaStBeRu |
+
+A source can expose one or more capabilities: `targets`, `event_parameters`,
+`coverage`, `epochs`, `photometry`, `objects`, `images`, `coadds`, `cutouts`,
+and `astrometry`. A source can be accessed by a Python API, HTTP request,
+TAP/Butler, local CSV, local files, or a database.
+
+Run usage is selected separately. For example, Rubin DP2 can be a context
+survey, a photometry source, and an image source. HSH can be a planning survey
+and an observed-epoch source. MOP can be a candidate input and event-parameter
+source.
 
 ### Coordinate authority
 
@@ -64,19 +81,24 @@ Every configured source becomes a `SourceSpec`:
 | `capabilities` | Descriptive list of data the source offers |
 | `options` | Remaining provider-specific settings, such as a path or Data Release |
 
-`capabilities` are currently descriptive metadata. They document and expose
-intent but do not dynamically replace adapter methods or enable products.
+`capabilities` document which tasks a source can support. The new task API uses
+that concept directly, while the older config workflow still maps capabilities
+through compatibility adapters.
 
 ### Adapter contracts
 
-The protocols in `target_selection.sources.base` define the smallest interface
-for each role:
+The current compatibility protocols in `target_selection.sources.base` still
+exist for config-file runs. The refactor target is capability-oriented
+protocols:
 
-| Role | Required operations | Normalized result |
+| Capability protocol | Required operation type | Normalized result |
 |---|---|---|
-| Target provider | `client(context)`, `collect_targets(context)` | Target table with `Target`, `RA_deg`, `Dec_deg` |
-| Follow-up survey | `import_observations(context)`, `observed_targets(context)` | Imported epochs and observed target table |
-| Reference survey | `data_release()` | Backend-specific release profile |
+| `TargetProvider` | collect target rows | `Target`, `RA_deg`, `Dec_deg`, provenance |
+| `EventDataProvider` | enrich event parameters | `t_0`, `t_E`, `u_0`, `mag_now`, priority |
+| `CoverageProvider` | query coverage/epochs | visits/images by target and band |
+| `PhotometryProvider` | load/query light curves | normalized photometry table |
+| `ObjectCatalogProvider` | match catalog objects | counterpart ID and separation |
+| `ImageProvider` / `CutoutProvider` | find images/coadds/cutouts | image metadata and PNG/FITS products |
 
 `SourceContext` gives adapters the validated configuration, persistent
 registry, shared cache directory, and optionally injected clients. Client
@@ -226,8 +248,10 @@ view used for one decision.
 | `target_selection.config` | Typed source-neutral configuration and structural validation |
 | `target_selection.sources.base` | Adapter protocols and shared context |
 | `target_selection.sources.registry` | Adapter registration and resolution |
-| `target_selection.sources.adapters` | Built-in MOP, CSV, HSH, and Rubin translations |
-| `target_selection.workflow` | Source orchestration, branch selection, persistence coordination, result objects |
+| `target_selection.sources.adapters` | Compatibility adapters for config-file runs |
+| `target_selection.sources.lsst` | Central LSST/Rubin TAP, Butler, coverage, coadd, and photometry helpers |
+| `target_selection.tasks` | Preferred notebook-level task API |
+| `target_selection.workflow` | Config-file orchestration, branch selection, persistence coordination, result objects |
 | `target_selection.products` | Compact discovery index for products that exist |
 | `target_registry` | SQLite schema, migrations, normalized imports, provenance, and cross-run queries |
 | `target_selection_pipeline` | Validated single-Rubin-release scientific backend and aggregate products |
@@ -249,12 +273,16 @@ discoverable; the registry and native caches make it reusable.
 
 ## Public and compatibility boundaries
 
-- `target_selection.run_analysis`: recommended source-neutral API.
-- `target-selection run --config ...`: reproducible CLI using the same API.
-- `mop_lsst.ipynb`: interactive configuration, execution, and product review.
-- `target_selection_pipeline.run_target_selection`: compatible low-level API
-  for one Rubin release and advanced dependency injection.
+- `target_selection.tasks` and package-level task functions: recommended
+  notebook API for interactive work with Python variables.
+- `target_selection.run_target_selection_tasks`: convenience task orchestrator.
+- `target_selection.run_analysis`: config-file API for reproducible CLI runs.
+- `target-selection run --config ...`: command-line entry point.
+- `target_selection.sources.lsst`: only task-level import location for
+  LSST/Rubin TAP, Butler, coverage, coadd, and photometry helpers.
+- `target_selection_pipeline.run_target_selection`: compatibility backend for
+  existing one-Rubin-release workflows.
 
-New user workflows should start with `run_analysis`. New source integrations
-should implement an adapter rather than add provider-specific conditions to the
-workflow. See [Adding a source](adding_sources.md).
+New notebook workflows should start with task functions. New source
+integrations should implement a source/capability adapter rather than add
+provider-specific conditions to the workflow. See [Adding a source](adding_sources.md).

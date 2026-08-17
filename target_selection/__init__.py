@@ -1,6 +1,25 @@
 """Extensible target-selection and follow-up planning toolkit."""
 
 from .config import AnalysisConfig, load_config
+
+from .tasks import (
+    collect_mop_targets,
+    load_target_list,
+    merge_targets,
+    evaluate_visibility,
+    save_visibility_plots,
+    make_visibility_sequence,
+    query_lsst_coverage,
+    compute_lsst_photometry,
+    save_lsst_photometry,
+    create_target_report,
+    create_target_reports,
+    create_lightcurves_report,
+    run_target_selection_tasks,
+    import_hsh_inventory,
+    observed_targets,
+)
+
 from .reference_catalog import (
     ReferenceCatalogConfig,
     ReferenceCatalogResult,
@@ -14,6 +33,21 @@ from .reference_catalog import (
 )
 
 __all__ = [
+    "observed_targets",
+    "import_hsh_inventory",
+    "run_target_selection_tasks",
+    "create_lightcurves_report",
+    "create_target_reports",
+    "create_target_report",
+    "save_lsst_photometry",
+    "compute_lsst_photometry",
+    "query_lsst_coverage",
+    "make_visibility_sequence",
+    "save_visibility_plots",
+    "evaluate_visibility",
+    "merge_targets",
+    "load_target_list",
+    "collect_mop_targets",
     "AnalysisConfig",
     "AnalysisResult",
     "ReferenceCatalogConfig",
