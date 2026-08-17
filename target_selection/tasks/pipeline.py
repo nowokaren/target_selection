@@ -15,7 +15,7 @@ from typing import Iterable
 import pandas as pd
 
 from target_selection.tasks.lsst import compute_lsst_photometry, query_lsst_coverage
-from target_selection.tasks.reports import create_lightcurves_report, create_target_reports
+from target_selection.tasks.reports import create_lightcurves_report, create_target_reports, create_lightcurve_plots
 from target_selection.tasks.targets import collect_mop_targets, load_target_list, merge_targets, restrict_targets
 from target_selection.tasks.surveys import import_hsh_inventory, observed_targets
 from target_selection.tasks.visibility import evaluate_visibility, make_visibility_sequence, save_visibility_plots
@@ -60,6 +60,7 @@ def run_target_selection_tasks(
     make_visibility_plots: bool = True,
     make_visibility_pdf: bool = False,
     make_lightcurves_pdf: bool = False,
+    make_lightcurve_plots: bool = False,
     make_target_reports: bool = False,
     max_workers: int = 4,
     minimum_altitude_deg: float = 40.0,
@@ -199,14 +200,22 @@ def run_target_selection_tasks(
         )
         result.lsst_photometry = photometry
 
-    if make_lightcurves_pdf and not targets.empty:
-        result.products["lightcurves_pdf"] = create_lightcurves_report(
-            targets,
-            output_path=paths["monitoring_reports"] / "lightcurves.pdf",
+    lightcurve_targets = result.visibility.loc[
+        result.visibility.get("selected_for_visibility", pd.Series(dtype=bool)).astype(bool)
+    ].drop_duplicates("Target") if not result.visibility.empty and "Target" in result.visibility else targets
+    if make_lightcurve_plots and not targets.empty:
+        result.products["lightcurve_plots"] = create_lightcurve_plots(
+            targets, output_dir=paths["lightcurves"], mop=mop,
             mop_photometry_dir=Path(output_dir) / "mop_photometry",
-            release_photometry=result.lsst_photometry,
-            coverage=result.coverage,
-            data_release=str(data_release),
+            release_photometry=result.lsst_photometry, coverage=result.coverage,
+            data_release=str(data_release), overwrite=overwrite_products, verbose=verbose,
+        )
+    if make_lightcurves_pdf and not lightcurve_targets.empty:
+        result.products["lightcurves_pdf"] = create_lightcurves_report(
+            lightcurve_targets, output_path=paths["run"] / "lightcurves.pdf",
+            mop_photometry_dir=Path(output_dir) / "mop_photometry",
+            release_photometry=result.lsst_photometry, coverage=result.coverage,
+            data_release=str(data_release), verbose=verbose,
         )
 
     if make_target_reports and not targets.empty:

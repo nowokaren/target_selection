@@ -114,6 +114,23 @@ def create_target_reports(
     return paths
 
 
+def create_lightcurve_plots(
+    targets: pd.DataFrame, *, output_dir: str | Path = "outputs/lightcurves",
+    mop_photometry_dir: str | Path = "outputs/mop_photometry",
+    mop=None, release_photometry: pd.DataFrame | None = None,
+    coverage: pd.DataFrame | None = None, observatory_epochs: pd.DataFrame | None = None,
+    observatory_photometry: pd.DataFrame | None = None, data_release: str = "DP2",
+    layers=None, overwrite: bool = False, verbose: bool = True,
+) -> list[Path]:
+    """Create persistent per-target light-curve PNGs in a general directory."""
+    from monitoring_report import create_monitoring_lightcurve_plots
+    return create_monitoring_lightcurve_plots(
+        targets, output_dir, mop=mop, mop_photometry_dir=mop_photometry_dir,
+        release_photometry=release_photometry, lsst_coverage=coverage,
+        observatory_epochs=observatory_epochs, observatory_photometry=observatory_photometry,
+        data_release=data_release, layers=layers, overwrite=overwrite, verbose=verbose,
+    )
+
 def create_lightcurves_report(
     targets: pd.DataFrame,
     *,

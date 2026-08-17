@@ -582,7 +582,8 @@ class AnalysisWorkflow:
             "run": run_path,
             "tables": run_path / "tables",
             "visibility_plots": run_path / "visibility_plots",
-            "monitoring_reports": run_path / "monitoring_reports",
+            "lightcurves": Path(self.config.output_dir) / "lightcurves",
+            "monitoring_reports": run_path,  # compatibility alias; no extra folder
             "sky_plots": run_path / "sky_plots",
         }
         for path in paths.values():
@@ -692,7 +693,8 @@ class AnalysisWorkflow:
             from monitoring_report import create_monitoring_report
 
             create_monitoring_report(
-                combined, paths["monitoring_reports"] / "lightcurves.pdf",
+                combined.loc[combined.get("passes_visibility_filter", pd.Series(True, index=combined.index)).astype(bool)],
+                paths["run"] / "lightcurves.pdf",
                 mop=mop_client, mop_photometry_dir=context.cache_dir / "mop_photometry",
                 observatory_epochs=context.database.observation_epochs(combined),
                 observatory_photometry=context.database.photometry(combined),

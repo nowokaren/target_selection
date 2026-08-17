@@ -318,6 +318,65 @@ def plot_monitoring_lightcurve(
     return ax
 
 
+def create_monitoring_lightcurve_plots(
+    targets: pd.DataFrame,
+    output_dir: str | Path,
+    *,
+    mop,
+    mop_photometry_dir: str | Path,
+    release_photometry: pd.DataFrame | None = None,
+    lsst_coverage: pd.DataFrame | None = None,
+    observatory_epochs: pd.DataFrame | None = None,
+    observatory_photometry: pd.DataFrame | None = None,
+    data_release: str = "DP2",
+    layers: Iterable[str] | None = None,
+    overwrite: bool = False,
+    verbose: bool = True,
+) -> list[Path]:
+    """Create/update one reusable PNG light curve per target."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    selected_layers = normalize_monitoring_layers(layers)
+    release_groups = ({name: group for name, group in release_photometry.groupby("Target", sort=False)}
+                      if release_photometry is not None and not release_photometry.empty and "Target" in release_photometry else {})
+    coverage_groups = ({name: group for name, group in lsst_coverage.groupby("Target", sort=False)}
+                       if lsst_coverage is not None and not lsst_coverage.empty and "Target" in lsst_coverage else {})
+    epoch_groups = ({name: group for name, group in observatory_epochs.groupby("Target", sort=False)}
+                    if observatory_epochs is not None and not observatory_epochs.empty and "Target" in observatory_epochs else {})
+    local_groups = ({name: group for name, group in observatory_photometry.groupby("Target", sort=False)}
+                    if observatory_photometry is not None and not observatory_photometry.empty and "Target" in observatory_photometry else {})
+    loader = lambda target: load_event_photometry(target, mop=mop, cache_dir=mop_photometry_dir)
+    paths: list[Path] = []
+    records = _sort_targets_by_mag_now(targets)
+    if verbose:
+        print(f"[reports] Updating {len(records)} light-curve PNG(s).", flush=True)
+    try:
+        from tqdm.auto import tqdm
+        iterator = tqdm(records.iterrows(), total=len(records), desc="Light curves", unit="target")
+    except ImportError:
+        iterator = records.iterrows()
+    for _, target in iterator:
+        name = str(target["Target"])
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("._") or "unknown_target"
+        path = output_dir / f"{safe}.png"
+        paths.append(path)
+        if path.exists() and not overwrite:
+            continue
+        figure, axis = plt.subplots(figsize=(10, 4.2))
+        plot_monitoring_lightcurve(
+            target, loader(target) if "mop_photometry" in selected_layers else pd.DataFrame(),
+            release_photometry=release_groups.get(name), lsst_coverage=coverage_groups.get(name),
+            observatory_epochs=epoch_groups.get(name), observatory_photometry=local_groups.get(name),
+            data_release=data_release, layers=selected_layers, ax=axis,
+        )
+        figure.tight_layout()
+        figure.savefig(path, dpi=150, bbox_inches="tight")
+        plt.close(figure)
+    if verbose:
+        print(f"[reports] Light-curve PNGs ready: {len(paths)} in {output_dir}", flush=True)
+    return paths
+
+
 def create_monitoring_report(
     targets: pd.DataFrame,
     output_path: str | Path,

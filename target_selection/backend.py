@@ -1586,17 +1586,28 @@ def run_target_selection(
     )
 
     if generate_monitoring_report:
-        from monitoring_report import create_monitoring_report
+        from monitoring_report import create_monitoring_report, create_monitoring_lightcurve_plots
         if verbose:
-            print("      Monitoring light-curve PDF", flush=True)
+            print("      Monitoring light-curve PNGs and selected-target PDF", flush=True)
         report_epochs = registry.observation_epochs(combined)
         report_photometry = registry.photometry(combined)
         report_layers = None if monitoring_layers is None else tuple(monitoring_layers)
         if generate_release_photometry:
             report_layers = tuple(dict.fromkeys((report_layers or ()) + ("release_photometry",)))
+        create_monitoring_lightcurve_plots(
+            combined, Path(root_dir) / "lightcurves", mop=mop,
+            mop_photometry_dir=Path(root_dir) / "mop_photometry",
+            release_photometry=forced_photometry if generate_release_photometry else None,
+            lsst_coverage=coverage_rows, observatory_epochs=report_epochs,
+            observatory_photometry=report_photometry, data_release=release.name,
+            layers=report_layers, overwrite=True, verbose=verbose,
+        )
+        report_targets = combined.loc[
+            combined.get("passes_visibility_filter", pd.Series(True, index=combined.index)).astype(bool)
+        ].copy()
         create_monitoring_report(
-            combined,
-            paths["monitoring_reports"] / "lightcurves.pdf",
+            report_targets,
+            paths["run"] / "lightcurves.pdf",
             mop=mop, mop_photometry_dir=Path(root_dir) / "mop_photometry",
             release_photometry=forced_photometry if generate_release_photometry else None,
             lsst_coverage=coverage_rows, observatory_epochs=report_epochs,

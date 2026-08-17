@@ -77,7 +77,10 @@ def create_run_structure(
         "tables": run_dir / "tables",
         "sky_plots": run_dir / "sky_plots",
         "visibility_plots": run_dir / "visibility_plots",
-        "monitoring_reports": run_dir / "monitoring_reports",
+        # Light-curve PNGs are persistent products shared by runs; the run PDF
+        # lives directly in the run directory.
+        "lightcurves": base_dir / "lightcurves",
+        "monitoring_reports": run_dir,  # compatibility alias; no extra folder
         "target_reports": base_dir / "target_reports",
         # Compatibility aliases for callers using the pre-task API.
         "targets": base_dir / "target_reports",
