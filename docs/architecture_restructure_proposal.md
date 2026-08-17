@@ -14,7 +14,7 @@ The most important modules are:
 | `target_selection.sources` | Adapter protocols and built-in adapters for MOP, HSH, CSV, and Rubin. |
 | `target_selection.workflow` | Orchestrates configured sources and dispatches Rubin/Data Release runs. |
 | `target_registry` | SQLite persistence for targets, aliases, source records, epochs, photometry, and run records. |
-| `target_selection_pipeline` | Large Rubin-oriented backend: MOP visible targets, HSH merge, visibility, TAP coverage, Butler coadds, photometry, summaries, sky maps, and target reports. |
+| `target_selection/backend.py` | Packaged Rubin-oriented backend: MOP visible targets, HSH merge, visibility, TAP coverage, Butler coadds, photometry, summaries, sky maps, and target reports. |
 | `visibility_plotter` | Local visibility physics and plots. |
 | `release_photometry` | Rubin coadd-forced and DIA forced-source photometry. |
 | `target_report`, `monitoring_report`, `observing_selection_summary` | Visualization products. |
@@ -37,7 +37,7 @@ flowchart TD
     K --> L[TargetRegistry + run outputs]
 ```
 
-This works, but the lower half is still too centralized. `target_selection_pipeline.py` knows about many concerns at once: MOP visibility, local HSH history, Rubin coverage, coadd discovery, DIA photometry, target dashboards, summary tables, sky maps, and run manifests.
+This works, but the lower half is still too centralized. `target_selection/backend.py` knows about many concerns at once: MOP visibility, local HSH history, Rubin coverage, coadd discovery, DIA photometry, target dashboards, summary tables, sky maps, and run manifests.
 
 ## Main conceptual issue to fix
 
@@ -330,7 +330,7 @@ Recommended phases:
 
 1. Define normalized source interfaces around **kind**, **access mode**, and **capabilities**. Do not hard-code `reference_survey` and `followup_survey` as incompatible source classes.
 2. Define capability protocols: `TargetProvider`, `EventDataProvider`, `CoverageProvider`, `EpochProvider`, `PhotometryProvider`, `ObjectCatalogProvider`, `ImageProvider`, and `CutoutProvider`.
-3. Move Rubin-specific work out of `target_selection_pipeline.py` into task modules: `tasks.coverage`, `tasks.photometry`, `tasks.images`, and `tasks.dashboard`.
+3. Continue moving the remaining responsibilities from `target_selection/backend.py` into dedicated task modules such as coverage, photometry, images, dashboards, and summaries.
 4. Promote MOP enrichment and photometry into provider capabilities instead of treating MOP as a special backend dependency.
 5. Store match results and reference photometry in the registry with explicit source, method, collection, counterpart ID, separation, status, and version.
 6. Replace product booleans with task/product groups while keeping old keywords as compatibility aliases.

@@ -257,7 +257,7 @@ view used for one decision.
 | `target_selection.workflow` | Config-file orchestration, branch selection, persistence coordination, result objects |
 | `target_selection.products` | Compact discovery index for products that exist |
 | `target_registry` | SQLite schema, migrations, normalized imports, provenance, and cross-run queries |
-| `target_selection_pipeline` | Validated single-Rubin-release scientific backend and aggregate products |
+| `target_selection.backend` | Packaged validated single-Rubin-release scientific backend and aggregate products |
 | `visibility_plotter` | Visibility physics, feasibility selection, nightly and sequence plots |
 | `release_photometry` | Reference-survey photometry measurement and cache |
 | `target_report`, `monitoring_report` | Individual and aggregate scientific visualization |
@@ -283,7 +283,7 @@ discoverable; the registry and native caches make it reusable.
 - `target-selection run --config ...`: command-line entry point.
 - `target_selection.sources.lsst`: only task-level import location for
   LSST/Rubin TAP, Butler, coverage, coadd, and photometry helpers.
-- `target_selection_pipeline.run_target_selection`: compatibility backend for
+- `target_selection_pipeline.run_target_selection`: root-level compatibility entry point for
   existing one-Rubin-release workflows.
 
 New notebook workflows should start with task functions. New source

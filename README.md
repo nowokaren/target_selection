@@ -20,7 +20,10 @@ target-selection catalog --config configs/lastberu_dp2.toml
 
 It performs chunked uploaded-table TAP cross-matches, queries Butler directly for coadd datasets at target positions, optionally samples Rubin coadd-property maps, and generates a resource-limited set of prioritized 20-arcsec cutout grids. See `docs/reference-catalog.md` and `notebooks/lastberu_reference_catalog.ipynb`.
 
-The same configuration is used from Python or the notebook:
+For interactive work, the recommended entry point is the task notebook
+[`notebooks/task_api_examples.ipynb`](notebooks/task_api_examples.ipynb). It
+uses explicit Python variables and lets you run only the tasks you need. The
+configuration workflow remains available for reproducible CLI runs:
 
 ```python
 from target_selection import load_config, run_analysis
@@ -36,11 +39,13 @@ The three source roles are target providers (MOP and future OMP), follow-up surv
 
 ## Project files
 
-- `mop_lsst.ipynb`: ordered interactive entry point using the shared TOML configuration.
-- `target_selection/`: normalized configuration, adapters, workflow, and CLI.
-- `configs/example.toml`: ordered configuration shared by CLI and notebook.
+- `notebooks/task_api_examples.ipynb`: recommended task-by-task interactive entry point.
+- `mop_lsst.ipynb`: configuration-driven compatibility notebook for complete runs.
+- `target_selection/`: normalized configuration, adapters, tasks, backend, workflow, and CLI.
+- `target_selection/backend.py`: packaged Rubin-oriented backend used by the compatibility workflow.
+- `target_selection_pipeline.py`: small compatibility shim for older imports.
+- `configs/example.toml`: ordered configuration shared by CLI and compatibility notebook.
 - `docs/`: architecture, extension, and product guides.
-- `target_selection_pipeline.py`: orchestration, queries, caching, tables, and sky maps.
 - `mop_photometry.py`: MOP photometry loading, caching, and preparation.
 - `target_report.py`: graphical dashboard for each target.
 - `release_photometry.py`: Rubin light-curve retrieval and persistent per-target photometry cache.
@@ -64,9 +69,18 @@ python -m pip install -e .
 
 The installation automatically downloads the tested `mop_api` version from GitHub. The `lsst.*` libraries are supplied by the RSP environment and are not installed with pip.
 
-## Notebook
+## Notebooks
 
-Open `mop_lsst.ipynb`, edit `configs/example.toml`, restart the kernel, and select **Run All**. The notebook loads `AnalysisConfig`, calls `run_analysis(config)`, and displays the products of the first selected reference survey. Additional reference-survey results remain available in `analysis_result.runs`.
+For independent tasks, open `notebooks/task_api_examples.ipynb` and uncomment only
+the sections required for the analysis. It demonstrates target collection,
+source merging, visibility, Rubin coverage/photometry, sky maps, target reports,
+and light-curve PDFs.
+
+For a complete configuration-driven run, open `mop_lsst.ipynb`, edit
+`configs/example.toml`, restart the kernel, and select **Run All**. This notebook
+loads `AnalysisConfig`, calls `run_analysis(config)`, and displays the products
+of the first selected reference survey. Additional reference-survey results
+remain available in `analysis_result.runs`.
 
 The first run may take time because it refreshes the configured providers and surveys; later runs reuse the persistent registry and provider-specific caches.
 
