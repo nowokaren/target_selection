@@ -30,7 +30,9 @@ def normalize_photometry_provenance(data: pd.DataFrame, *, provider: str = "MOP"
 def _valid_photometry(data: pd.DataFrame) -> bool:
     if data is None or data.empty or not {"Timestamp", "Magnitude"}.issubset(data.columns):
         return False
-    return bool(pd.to_datetime(data["Timestamp"], errors="coerce").notna().any() and pd.to_numeric(data["Magnitude"], errors="coerce").notna().any())
+    timestamp = pd.to_datetime(data["Timestamp"], errors="coerce")
+    magnitude = pd.to_numeric(data["Magnitude"], errors="coerce")
+    return bool((timestamp.notna() & magnitude.notna()).any())
 
 
 def load_event_photometry(target, *, mop, cache_dir, refresh=False, legacy_cache_dir=None):
