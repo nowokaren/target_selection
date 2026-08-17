@@ -88,8 +88,11 @@ through compatibility adapters.
 ### Adapter contracts
 
 The current compatibility protocols in `target_selection.sources.base` still
-exist for config-file runs. The refactor target is capability-oriented
-protocols:
+exist for config-file runs. The executable backend now lives in
+`target_selection.backend`; the root-level `target_selection_pipeline.py` is only
+a compatibility shim for older notebooks. New task modules import the packaged
+backend, source adapters, and product helpers directly. The refactor target is
+capability-oriented protocols:
 
 | Capability protocol | Required operation type | Normalized result |
 |---|---|---|
@@ -210,7 +213,7 @@ AnalysisResult
 
 In planning-only mode the MOP adapter collects provider targets directly. In a
 reference-survey run, the primary MOP client is passed into the existing
-validated `run_target_selection` backend, which already owns MOP enrichment,
+validated `target_selection.backend.run_target_selection` backend, which already owns MOP enrichment,
 photometry cache handling, magnitude cuts, and the Rubin-oriented product
 sequence. Other providers and follow-up targets enter that backend through the
 normalized additional-target union.

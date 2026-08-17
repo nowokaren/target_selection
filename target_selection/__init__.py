@@ -1,6 +1,7 @@
 """Extensible target-selection and follow-up planning toolkit."""
 
 from .config import AnalysisConfig, load_config
+from .products import plot_sky_dual_metric
 
 from .tasks import (
     collect_mop_targets,
@@ -48,6 +49,7 @@ __all__ = [
     "merge_targets",
     "load_target_list",
     "collect_mop_targets",
+    "plot_sky_dual_metric",
     "AnalysisConfig",
     "AnalysisResult",
     "ReferenceCatalogConfig",

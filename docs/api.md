@@ -3,7 +3,9 @@
 ## Recommended Python task API
 
 The preferred notebook API is task-oriented. Use normal Python variables in one
-cell, and call only the steps needed for the current question.
+cell, and call only the steps needed for the current question. A complete
+walkthrough is available in
+[`notebooks/task_api_examples.ipynb`](https://github.com/nowokaren/target_selection/blob/main/notebooks/task_api_examples.ipynb).
 
 ```python
 from target_selection import (

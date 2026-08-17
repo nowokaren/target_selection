@@ -122,9 +122,9 @@ class MopTargetProvider:
             return context.clients[self.spec.name]
         if "mop" in context.clients:
             return context.clients["mop"]
-        from target_selection_pipeline import _create_mop_client
+        from target_selection.sources.mop import create_client
 
-        return _create_mop_client()
+        return create_client()
 
     def collect_targets(self, context: SourceContext) -> pd.DataFrame:
         client = self.client(context)
@@ -134,7 +134,7 @@ class MopTargetProvider:
             end_date=context.config.resolved_end_date,
             sort_by_mag=False,
         )
-        from target_selection_pipeline import _apply_authoritative_mop_coordinates
+        from target_selection.sources.mop import apply_authoritative_coordinates
 
         if not bool(self.spec.options.get("enrich", True)):
             targets = _normalize_targets(daily, self.spec.name)
@@ -153,7 +153,7 @@ class MopTargetProvider:
             photometry_dir=context.cache_dir / "mop_photometry",
             refresh_parameters=context.config.cache.refresh_target_providers,
         ).assign(target_source=self.spec.name, is_mop_visible_in_run=True)
-        return _apply_authoritative_mop_coordinates(targets)
+        return apply_authoritative_coordinates(targets)
 
 
 class CsvTargetProvider:

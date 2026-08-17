@@ -12,7 +12,9 @@ from observatory_observations import canonical_target_name
 from target_registry import TargetRegistry
 from target_region import classify_target_region
 from target_selection.config import AnalysisConfig
-from target_selection.products import write_product_index
+from target_selection.products import plot_sky_dual_metric, write_product_index
+from target_selection.sources.mop import apply_authoritative_coordinates
+from target_selection.run_paths import observing_window_slug, safe_name
 from target_selection.sources import (
     AdapterRegistry,
     SourceContext,
@@ -205,7 +207,7 @@ class AnalysisWorkflow:
         self.adapters = adapters or default_adapter_registry()
         self.clients = dict(clients or {})
         if runner is None:
-            from target_selection_pipeline import run_target_selection
+            from target_selection.backend import run_target_selection
 
             runner = run_target_selection
         self.runner = runner
@@ -305,7 +307,7 @@ class AnalysisWorkflow:
             # Resolve user/follow-up target names against MOP before any
             # coordinate-dependent calculation. A successful event-page match
             # replaces every lower-authority position at full float precision.
-            from target_selection_pipeline import _apply_authoritative_mop_coordinates
+
 
             additional_targets = mop_client.enrich_microlensing_parameters(
                 additional_targets,
@@ -315,9 +317,7 @@ class AnalysisWorkflow:
                 photometry_dir=context.cache_dir / "mop_photometry",
                 refresh=self.config.cache.refresh_target_providers,
             )
-            additional_targets = _apply_authoritative_mop_coordinates(
-                additional_targets
-            )
+            additional_targets = apply_authoritative_coordinates(additional_targets)
             mop_ra = (
                 pd.to_numeric(additional_targets["mop_ra_deg"], errors="coerce")
                 if "mop_ra_deg" in additional_targets
@@ -508,7 +508,6 @@ class AnalysisWorkflow:
         mop_client: Any,
         hsh_image_catalog: str | None,
     ) -> AnalysisResult:
-        from target_selection_pipeline import _observing_window_slug, _safe_name
         from visibility_plotter import (
             build_visibility_selection,
             save_nightly_visibility_plots,
@@ -570,9 +569,9 @@ class AnalysisWorkflow:
             else f"{self.config.start_date}_to_{self.config.resolved_end_date}"
         )
         run_label = (
-            f"{_safe_name(self.config.name)}_" if self.config.name else ""
+            f"{safe_name(self.config.name)}_" if self.config.name else ""
         ) + (
-            f"{date_label}__{_observing_window_slug(self.config.selection.observing_windows)}"
+            f"{date_label}__{observing_window_slug(self.config.selection.observing_windows)}"
         )
         run_path = (
             Path(self.config.output_dir)
@@ -637,8 +636,6 @@ class AnalysisWorkflow:
             index=False,
         )
         if self.config.products.sky_maps and not combined.empty:
-            from target_selection_pipeline import plot_sky_dual_metric
-
             sky_targets = combined.loc[
                 combined["passes_visibility_filter"].fillna(False).astype(bool)
             ].copy()

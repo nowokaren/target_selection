@@ -11,12 +11,6 @@ from observatory_observations import canonical_target_name
 from target_selection.sources.adapters import _normalize_targets
 
 
-def _create_mop_client():
-    from mop_api import MOPClient
-
-    return MOPClient()
-
-
 def collect_mop_targets(
     *,
     start_date: str,
@@ -29,7 +23,9 @@ def collect_mop_targets(
     refresh: bool = False,
 ) -> pd.DataFrame:
     """Collect MOP visible targets and optionally enrich parameters/photometry."""
-    mop = mop or _create_mop_client()
+    if mop is None:
+        from target_selection.sources.mop import create_client
+        mop = create_client()
     end_date = end_date or start_date
     daily = mop.visible_targets(
         observatory=observatory,
@@ -55,9 +51,9 @@ def collect_mop_targets(
         photometry_dir=cache / "mop_photometry",
         refresh_parameters=refresh,
     ).assign(target_source="mop", is_mop_visible_in_run=True)
-    from target_selection_pipeline import _apply_authoritative_mop_coordinates
+    from target_selection.sources.mop import apply_authoritative_coordinates
 
-    return _apply_authoritative_mop_coordinates(summary)
+    return apply_authoritative_coordinates(summary)
 
 
 def load_target_list(path: str | Path, *, source_name: str = "user_targets", column_map: Mapping[str, str] | None = None) -> pd.DataFrame:
