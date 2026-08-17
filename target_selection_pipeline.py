@@ -26,7 +26,7 @@ from target_region import classify_target_region
 
 
 CACHE_VERSION = 4
-TARGET_REPORT_VERSION = 12
+TARGET_REPORT_VERSION = 13
 
 
 def _safe_name(value: object) -> str:
@@ -59,6 +59,24 @@ def _load_additional_targets(targets: pd.DataFrame | str | Path | None) -> pd.Da
     return data.loc[
         data["Target"].ne("") & data["RA_deg"].notna() & data["Dec_deg"].notna()
     ].drop_duplicates("Target", keep="first").reset_index(drop=True)
+
+
+def _target_name_mask(targets: pd.DataFrame, target_names: Iterable[str] | None) -> pd.Series:
+    """Return rows matching explicit user-selected target names."""
+    if target_names is None:
+        return pd.Series(True, index=targets.index)
+    names = tuple(str(name).strip() for name in target_names if str(name).strip())
+    if not names:
+        return pd.Series(True, index=targets.index)
+    if targets.empty or "Target" not in targets:
+        return pd.Series(False, index=targets.index)
+    try:
+        from observatory_observations import canonical_target_name
+        wanted = {canonical_target_name(name) for name in names}
+        return targets["Target"].map(canonical_target_name).isin(wanted)
+    except Exception:
+        wanted = {name.casefold() for name in names}
+        return targets["Target"].astype(str).str.strip().str.casefold().isin(wanted)
 
 
 def _mop_magnitude_pass_mask(
@@ -267,8 +285,10 @@ def create_run_structure(
         "sky_plots": run_dir / "sky_plots",
         "visibility_plots": run_dir / "visibility_plots",
         "monitoring_reports": run_dir / "monitoring_reports",
-        "targets": run_dir / "targets",
-        "targets_visibility_selected": run_dir / "targets_visibility_selected",
+        "target_reports": base_dir / "target_reports",
+        # Backward-compatible keys. Reports are flat files in the shared folder.
+        "targets": base_dir / "target_reports",
+        "targets_visibility_selected": base_dir / "target_reports",
     }
     for path in paths.values():
         path.mkdir(parents=True, exist_ok=True)
@@ -1004,7 +1024,7 @@ def save_target_reports(
             _write_report_versions(statuses_path, statuses)
             update_progress()
             continue
-        figure.savefig(report_path, dpi=180, bbox_inches="tight")
+        figure.savefig(report_path, dpi=150, bbox_inches="tight")
         plt.close(figure)
         versions[file_key] = expected_version
         statuses.pop(file_key, None)
@@ -1078,6 +1098,96 @@ def _create_default_target_plotter(
     return standard_target_plotter
 
 
+def regenerate_target_report_from_run(
+    run_dir: str | Path,
+    target_name: str,
+    *,
+    output_dir: str | Path | None = None,
+    data_release: str | DataReleaseConfig = "DP2",
+    mop=None,
+    tap_service=None,
+    butler=None,
+    photometry_method: str | None = None,
+    refresh_photometry: bool = False,
+    overwrite: bool = True,
+) -> Path:
+    """Regenerate one report from the products and caches of an existing run.
+
+    The report is written to ``outputs/target_reports`` by default, rather than
+    inside the date-specific run directory.  The run supplies the canonical
+    target coordinates, TAP coverage, and optional DP2 photometry; MOP
+    photometry is loaded from the persistent ``mop_photometry`` cache.
+    """
+    run_path = Path(run_dir)
+    tables = run_path / "tables"
+    combined_path = tables / "combined_targets.csv"
+    if not combined_path.exists():
+        raise FileNotFoundError(f"Missing run target table: {combined_path}")
+    combined = pd.read_csv(combined_path)
+    if "Target" not in combined:
+        raise ValueError(f"{combined_path} has no Target column")
+    matches = combined.loc[combined["Target"].astype(str).eq(str(target_name))]
+    if matches.empty:
+        raise KeyError(f"Target {target_name!r} is not present in {combined_path}")
+    target = matches.iloc[0]
+
+    coverage_path = tables / "coverage_raw.csv"
+    if not coverage_path.exists():
+        coverage_path = tables / "coverage.csv"
+    coverage = pd.read_csv(coverage_path) if coverage_path.exists() else pd.DataFrame()
+    if not coverage.empty and "Target" in coverage:
+        coverage = coverage.loc[coverage["Target"].astype(str).eq(str(target_name))].copy()
+
+    forced_path = tables / "release_forced_photometry.csv"
+    forced = pd.read_csv(forced_path) if forced_path.exists() else pd.DataFrame()
+    if not forced.empty and "Target" in forced:
+        forced = forced.loc[forced["Target"].astype(str).eq(str(target_name))].copy()
+
+    release = get_data_release(data_release)
+    if photometry_method is not None:
+        method = str(photometry_method).strip().lower()
+        if method not in {"coadd_forced", "dia_forced_catalog", "calexp_forced"}:
+            raise ValueError(
+                "photometry_method must be coadd_forced, dia_forced_catalog, or calexp_forced"
+            )
+        from dataclasses import replace as dataclass_replace
+        release = dataclass_replace(release, photometry_method=method)
+    root_dir = run_path.parent
+    if release.photometry_method == "dia_forced_catalog":
+        has_dia_coordinates = (
+            not forced.empty
+            and "measurement_method" in forced
+            and forced["measurement_method"].astype(str).eq("dia_forced_catalog").any()
+            and {"dia_object_ra_deg", "dia_object_dec_deg"}.issubset(forced.columns)
+            and forced[["dia_object_ra_deg", "dia_object_dec_deg"]].notna().all(axis=1).any()
+        )
+        if refresh_photometry or not has_dia_coordinates:
+            from release_photometry import query_dia_forced_photometry, save_target_release_photometry
+            tap_service = tap_service or _create_tap_service(release)
+            forced = query_dia_forced_photometry(
+                target[["Target", "RA_deg", "Dec_deg"]].to_frame().T,
+                tap_service=tap_service, data_release=release, max_workers=1, verbose=True,
+            )
+            if not forced.empty:
+                save_target_release_photometry(forced, root_dir / "rubin_photometry")
+    destination = Path(output_dir) if output_dir is not None else root_dir / "target_reports"
+    destination.mkdir(parents=True, exist_ok=True)
+    report_path = destination / f"{_safe_name(target_name)}_target_report.png"
+    if report_path.exists() and not overwrite:
+        return report_path
+
+    plotter = _create_default_target_plotter(
+        mop=mop, tap_service=tap_service, butler=butler, release=release,
+        root_dir=root_dir, release_photometry=forced,
+    )
+    figure = plotter(target, coverage)
+    if figure is None:
+        raise RuntimeError(f"No coadd covers target {target_name!r}")
+    figure.savefig(report_path, dpi=150, bbox_inches="tight")
+    plt.close(figure)
+    return report_path
+
+
 def run_target_selection(
     start_date: str,
     end_date: str | None = None,
@@ -1115,11 +1225,13 @@ def run_target_selection(
     hsh_image_catalog: str | Path | None = None,
     refresh_hsh_data: bool = False,
     max_current_magnitude: float | None = None,
+    include_mop_visible_targets: bool = True,
     hsh_peak_half_width_t_e: float = 0.3,
     hsh_event_half_width_t_e: float = 2.0,
     include_previously_observed: bool = True,
     previously_observed_providers: Iterable[str] = ("HSH", "JS"),
     additional_targets: pd.DataFrame | str | Path | None = None,
+    target_names: Iterable[str] | None = None,
     show_queried_targets: bool = True,
     target_registry_path: str | Path | None = None,
     generate_monitoring_report: bool = False,
@@ -1162,7 +1274,13 @@ def run_target_selection(
     target_data_photometry_sources = tuple(
         str(source) for source in target_data_photometry_sources
     )
+    if isinstance(target_names, str):
+        target_names = (target_names,)
+    elif target_names is not None:
+        target_names = tuple(str(name) for name in target_names)
     user_targets = _load_additional_targets(additional_targets)
+    if target_names is not None:
+        user_targets = user_targets.loc[_target_name_mask(user_targets, target_names)].copy()
     end_date = end_date or start_date
     if isinstance(release_photometry_targets, str):
         release_photometry_targets = (release_photometry_targets,)
@@ -1187,6 +1305,10 @@ def run_target_selection(
         registry.observed_targets(providers=previously_observed_providers)
         if include_previously_observed else pd.DataFrame()
     )
+    if target_names is not None:
+        observed_targets = observed_targets.loc[
+            _target_name_mask(observed_targets, target_names)
+        ].copy()
     # Databases created before the coordinate-provenance migration may contain
     # an HSH image WCS reference point as a target position. Never reuse those
     # legacy coordinates: MOP enrichment must replace them, or the target is
@@ -1208,18 +1330,24 @@ def run_target_selection(
     started = perf_counter()
 
     daily_cache_available = (
-        reuse_cache and daily_path.exists() and not refresh_mop_data
+        include_mop_visible_targets
+        and reuse_cache and daily_path.exists() and not refresh_mop_data
         and (max_current_magnitude is None or initial_mop_path.exists())
     )
     if verbose:
-        print("[1/5] Visible MOP targets" + (" (cache)" if daily_cache_available else ""), flush=True)
-    if daily_cache_available:
+        label = "Visible MOP targets" if include_mop_visible_targets else "Visible MOP targets (disabled)"
+        print("[1/5] " + label + (" (cache)" if daily_cache_available else ""), flush=True)
+    if not include_mop_visible_targets:
+        daily = pd.DataFrame(columns=["Target", "RA_deg", "Dec_deg", "observation_date"])
+    elif daily_cache_available:
         daily = pd.read_csv(daily_path)
     else:
         daily = mop.visible_targets(
             observatory=observatory, start_date=start_date, end_date=end_date,
             sort_by_mag=False,
         )
+    if target_names is not None:
+        daily = daily.loc[_target_name_mask(daily, target_names)].copy()
     initial_mop = daily.copy()
     initial_mop["passes_magnitude_cut"] = _mop_magnitude_pass_mask(initial_mop, max_current_magnitude)
     initial_mop.to_csv(initial_mop_path, index=False)
@@ -1231,7 +1359,8 @@ def run_target_selection(
     # A non-default cut invalidates the old enriched summary cache unless the
     # caller explicitly reruns the MOP enrichment.
     summary_cache_available = (
-        reuse_cache and summary_path.exists() and not refresh_mop_data
+        include_mop_visible_targets
+        and reuse_cache and summary_path.exists() and not refresh_mop_data
         and max_current_magnitude is None
     )
     if summary_cache_available:
@@ -1243,7 +1372,7 @@ def run_target_selection(
         print("[2/5] MOP parameters + photometry" + (" (cache)" if summary_cache_available else ""), flush=True)
     if summary_cache_available:
         visible_summary = pd.read_csv(summary_path)
-    else:
+    elif include_mop_visible_targets:
         visible_summary = mop.visibility_summary(
             observatory=observatory, start_date=start_date, end_date=end_date,
             include_microlensing_parameters=True, parameter_errors="ignore",
@@ -1252,6 +1381,9 @@ def run_target_selection(
             photometry_dir=Path(root_dir) / "mop_photometry",
             refresh_parameters=not reuse_cache,
         )
+        visible_summary.to_csv(summary_path, index=False)
+    else:
+        visible_summary = pd.DataFrame(columns=["Target", "RA_deg", "Dec_deg"])
         visible_summary.to_csv(summary_path, index=False)
     visible_summary, excluded_summary = _filter_invalid_mop_magnitudes(visible_summary, max_current_magnitude)
     if excluded_summary and verbose and not excluded_daily:
@@ -1383,39 +1515,54 @@ def run_target_selection(
     registry.mark_source("MOP", "target_data")
     summary.to_csv(analysis_targets_path, index=False)
 
-    from visibility_plotter import (
-        build_visibility_selection,
-        save_nightly_visibility_plots,
-        summarize_visibility_selection,
+    needs_visibility = (
+        generate_visibility_plots
+        or generate_observing_selection_summary
+        or generate_sky_maps
+        or target_report_scope == "visibility_selected"
     )
-    visibility_daily = _visibility_daily_targets(
-        summary, start_date, end_date, scope=visibility_target_scope, mop_daily=daily,
-    )
-    if verbose:
-        print(f"      Visibility selection ({visibility_target_scope}: {len(visibility_daily)} target-night rows)", flush=True)
-    visibility_selection = build_visibility_selection(
-        visibility_daily, start_date, end_date, observatory=observatory,
-        minimum_altitude=visibility_minimum_altitude,
-        minimum_observable_minutes=visibility_minimum_observable_minutes,
-        time_step_minutes=visibility_time_step_minutes,
-        observing_windows=visibility_observing_windows,
-    )
-    visibility_selection.to_csv(paths["visibility_plots"] / "visibility_selection.csv", index=False)
-    visibility_target_summary = summarize_visibility_selection(visibility_selection)
-    visibility_target_summary.to_csv(paths["tables"] / "visibility_target_summary.csv", index=False)
-    if generate_visibility_plots:
+    visibility_daily = pd.DataFrame()
+    visibility_selection = pd.DataFrame()
+    if needs_visibility:
+        from visibility_plotter import (
+            build_visibility_selection,
+            save_nightly_visibility_plots,
+            summarize_visibility_selection,
+        )
+        visibility_daily = _visibility_daily_targets(
+            summary, start_date, end_date, scope=visibility_target_scope, mop_daily=daily,
+        )
         if verbose:
-            print("      Nightly visibility plots", flush=True)
-        save_nightly_visibility_plots(
-            visibility_daily, start_date, end_date, paths["visibility_plots"],
-            observatory=observatory, minimum_altitude=visibility_minimum_altitude,
+            print(f"      Visibility selection ({visibility_target_scope}: {len(visibility_daily)} target-night rows)", flush=True)
+        visibility_selection = build_visibility_selection(
+            visibility_daily, start_date, end_date, observatory=observatory,
+            minimum_altitude=visibility_minimum_altitude,
             minimum_observable_minutes=visibility_minimum_observable_minutes,
             time_step_minutes=visibility_time_step_minutes,
             observing_windows=visibility_observing_windows,
-            target_scope=visibility_target_scope,
-            selection=visibility_selection,
-            overwrite=overwrite_visibility_plots, verbose=verbose,
         )
+        visibility_selection.to_csv(paths["visibility_plots"] / "visibility_selection.csv", index=False)
+        visibility_target_summary = summarize_visibility_selection(visibility_selection)
+        visibility_target_summary.to_csv(paths["tables"] / "visibility_target_summary.csv", index=False)
+        if generate_visibility_plots:
+            if verbose:
+                print("      Nightly visibility plots", flush=True)
+            save_nightly_visibility_plots(
+                visibility_daily, start_date, end_date, paths["visibility_plots"],
+                observatory=observatory, minimum_altitude=visibility_minimum_altitude,
+                minimum_observable_minutes=visibility_minimum_observable_minutes,
+                time_step_minutes=visibility_time_step_minutes,
+                observing_windows=visibility_observing_windows,
+                target_scope=visibility_target_scope,
+                selection=visibility_selection,
+                overwrite=overwrite_visibility_plots, verbose=verbose,
+            )
+    else:
+        if verbose:
+            print("      Local visibility selection skipped", flush=True)
+        visibility_target_summary = summary[["Target"]].copy()
+        visibility_target_summary["passes_visibility_filter"] = False
+        visibility_target_summary["visibility_skipped"] = True
 
     queried_targets = summary[[
         column for column in [
@@ -1556,7 +1703,7 @@ def run_target_selection(
                 cached = load_target_release_photometry(persistent_cache_dir, target_name)
                 required = {
                     "data_release", "butler_collection", "measurement_method",
-                    "RA_deg", "Dec_deg",
+                    "RA_deg", "Dec_deg", "dia_object_ra_deg", "dia_object_dec_deg",
                 }
                 if cached.empty or not required.issubset(cached.columns):
                     return cached.iloc[0:0].copy()
@@ -1936,17 +2083,20 @@ def run_target_selection(
         "n_daily_rows": int(len(daily)), "n_targets": int(len(combined)),
         "n_mop_invalid_magnitude_excluded": int(excluded_daily + excluded_summary + excluded_observed),
         "max_current_magnitude": None if max_current_magnitude is None else float(max_current_magnitude),
+        "include_mop_visible_targets": bool(include_mop_visible_targets),
         "max_workers": int(max_workers), "reuse_cache": bool(reuse_cache),
         "cache_version": CACHE_VERSION,
         "target_report_version": TARGET_REPORT_VERSION,
         "overwrite_target_plots": bool(overwrite_target_plots),
         "target_report_scope": target_report_scope,
+        "target_names": None if target_names is None else list(target_names),
         "n_target_reports_requested": int(len(report_targets)),
         "generate_sky_maps": bool(generate_sky_maps),
         "sky_marker_encoding": sky_marker_encoding,
         "show_coverage_background": bool(show_coverage_background),
         "coverage_resolution": int(coverage_resolution),
         "generate_visibility_plots": bool(generate_visibility_plots),
+        "visibility_evaluated": bool(needs_visibility),
         "overwrite_visibility_plots": bool(overwrite_visibility_plots),
         "visibility_minimum_altitude": float(visibility_minimum_altitude),
         "visibility_minimum_observable_minutes": float(visibility_minimum_observable_minutes),

@@ -55,8 +55,48 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
     if not coadds:
         return None
 
-    fig = plt.figure(figsize=(26,16))
-    gs = fig.add_gridspec(4, len(bands), height_ratios=[3, 3, 2.25, 3.8], hspace=.66, wspace=.55)
+    release_photometry = (
+        release_photometry if release_photometry is not None else pd.DataFrame()
+    )
+    # DIA match metadata is persisted with the light-curve rows. Keep one
+    # representative match for the report panel and coadd markers.
+    dia_rows = release_photometry
+    if "measurement_method" in dia_rows:
+        dia_rows = dia_rows.loc[
+            dia_rows["measurement_method"].astype(str).eq("dia_forced_catalog")
+        ]
+    dia_match = False
+    dia_status = "not evaluated (coadd forced mode)"
+    dia_object_id = None
+    dia_sep_arcsec = np.nan
+    dia_coord = None
+    if not dia_rows.empty:
+        if "diaObjectId" in dia_rows:
+            matched_rows = dia_rows.loc[
+                pd.to_numeric(dia_rows["diaObjectId"], errors="coerce").notna()
+            ]
+        else:
+            matched_rows = dia_rows.iloc[0:0]
+        if not matched_rows.empty:
+            match_row = matched_rows.iloc[0]
+            dia_match = True
+            dia_status = "matched"
+            dia_object_id = int(float(match_row["diaObjectId"]))
+            dia_sep_arcsec = pd.to_numeric(
+                match_row.get("dia_match_sep_arcsec"), errors="coerce"
+            )
+            dia_ra = pd.to_numeric(match_row.get("dia_object_ra_deg"), errors="coerce")
+            dia_dec = pd.to_numeric(match_row.get("dia_object_dec_deg"), errors="coerce")
+            if pd.notna(dia_ra) and pd.notna(dia_dec):
+                dia_coord = SkyCoord(float(dia_ra) * u.deg, float(dia_dec) * u.deg)
+        else:
+            statuses = dia_rows.get("measurement_status", pd.Series(dtype=str)).astype(str)
+            dia_status = statuses.iloc[0] if not statuses.empty else "no match"
+            if dia_status == "no_dia_object":
+                dia_status = "no match"
+
+    fig = plt.figure(figsize=(21, 11.5))
+    gs = fig.add_gridspec(4, len(bands), height_ratios=[2.55, 2.55, 1.55, 3.0], hspace=.28, wspace=.24)
 
     for j, band in enumerate(bands):
         result = coadds.get(band)
@@ -77,7 +117,14 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
             ax = fig.add_subplot(gs[row,j],projection=wcs)
             im = ax.imshow(arr,origin="lower",cmap="gray",norm=norm)
             ax.add_patch(SphericalCircle(coord,circle_arcsec*u.arcsec,transform=ax.get_transform("icrs"),
-                                         edgecolor="red",facecolor="none",lw=1.5))
+                                         edgecolor="red",facecolor="none",lw=1.5, label="MOP target"))
+            if dia_match and dia_coord is not None:
+                ax.add_patch(SphericalCircle(
+                    dia_coord, circle_arcsec * u.arcsec,
+                    transform=ax.get_transform("icrs"),
+                    edgecolor="cyan", facecolor="none", lw=1.4,
+                    linestyle="--", label="Matched DiaObject",
+                ))
             if lim: ax.set(xlim=(x-lim,x+lim),ylim=(y-lim,y+lim))
             ax.set_title(title,fontsize=10,pad=5)
             ax.coords[0].set_axislabel("RA [deg]",minpad=1.2); ax.coords[1].set_axislabel("Dec [deg]",minpad=.5)
@@ -116,9 +163,6 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
     ax_lc = fig.add_subplot(gs[3, :])
     if photometry is None:
         photometry = photometry_loader(name) if photometry_loader is not None else pd.DataFrame()
-    release_photometry = (
-        release_photometry if release_photometry is not None else pd.DataFrame()
-    )
     selected_filters = select_lightcurve_filters(photometry)
     lightcurve_start = pd.Timestamp("2024-01-01")
     pre_2024_counts: dict[str, int] = {}
@@ -268,16 +312,24 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
 
     valid_cols = [c for c in meta_cols + mop_cols if str(target[c]).strip().lower() not in {"nan", "none", ""}]
     panel_lines = ["TARGET DATA", "", f"RA: {ra:.5f}°", f"Dec: {dec:.5f}°", f"Coverage rows: {len(calexps)}"]
+    panel_lines.extend(["", "DIA MATCH", f"Status: {dia_status}"])
+    if dia_match:
+        panel_lines.append(f"DiaObject ID: {dia_object_id}")
+        if pd.notna(dia_sep_arcsec):
+            panel_lines.append(f"Separation: {float(dia_sep_arcsec):.3f} arcsec")
+        if dia_coord is not None:
+            panel_lines.append(f"DiaObject RA: {dia_coord.ra.deg:.6f}°")
+            panel_lines.append(f"DiaObject Dec: {dia_coord.dec.deg:.6f}°")
     if priority:
         panel_lines.extend(["", "PRIORITY"])
     if valid_cols:
         panel_lines.extend(["", "PARAMETERS", ""] + [panel_line(c) for c in valid_cols])
 
-    fig.suptitle(f"{name}{flag}", y=.985, fontsize=14,
+    fig.suptitle(f"{name}{flag}", y=.985, fontsize=13,
                  color="crimson" if priority else "black",
                  fontweight="bold" if priority else "normal")
-    fig.text(.825, .91, "\n".join(panel_lines), ha="left", va="top", fontsize=9.5,
-             linespacing=1.45, family="monospace",
-             bbox=dict(boxstyle="round,pad=.7", facecolor="whitesmoke", edgecolor="0.75"))
-    fig.subplots_adjust(top=.94,bottom=.055,left=.04,right=.79)
+    fig.text(.842, .91, "\n".join(panel_lines), ha="left", va="top", fontsize=8.4,
+             linespacing=1.25, family="monospace",
+             bbox=dict(boxstyle="round,pad=.45", facecolor="whitesmoke", edgecolor="0.75"))
+    fig.subplots_adjust(top=.94,bottom=.045,left=.035,right=.815)
     return fig

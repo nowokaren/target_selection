@@ -1,0 +1,49 @@
+[run]
+name = "single_target_report"
+start_date = "2026-08-14"
+end_date = "2026-08-14"
+observatory = "El Leoncito"
+output_dir = "outputs"
+
+[sources]
+target_providers = []
+followup_surveys = []
+reference_surveys = ["rubin_dp2"]
+
+[selection]
+target_data_scope = "all"
+target_names = ["OGLE-2025-BLG-1121"]
+
+[products]
+visibility_plots = false
+observing_selection_summary = false
+sky_maps = false
+monitoring_report = false
+target_reports = true
+target_report_scope = "all_queried"
+reference_photometry = true
+coverage_background = false
+
+[target_providers.mop]
+adapter = "mop"
+label = "MOP"
+capabilities = ["targets", "parameters", "photometry"]
+enrich = true
+
+[reference_surveys.rubin_dp2]
+adapter = "rubin"
+label = "Rubin DP2"
+data_release = "DP2"
+photometry_method = "dia_forced_catalog"
+
+[cache]
+reuse = true
+database_path = "target_database/target_selection.sqlite"
+refresh_target_providers = false
+refresh_followup_surveys = false
+
+[runtime]
+max_workers = 4
+verbose = true
+overwrite_target_reports = true
+overwrite_reference_photometry = true

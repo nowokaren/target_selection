@@ -14,7 +14,7 @@ that exist and gives a short description and relative path for each one.
 | Observing-selection table and PNG | Optional | Optional | `observing_selection_summary = true` |
 | Monitoring light-curve PDF | Optional | Optional | `monitoring_report = true` |
 | Sky maps | No | Optional | `sky_maps = true` |
-| Individual coadd dashboard PNGs | No | Optional | `target_reports = true` |
+| Individual coadd dashboard PNGs | No | Optional | `target_reports = true`; written to shared `target_reports/` |
 | Reference forced photometry / DIA light curves | No | Optional | `reference_photometry = true` |
 | Large coordinate-catalog enrichment | Separate workflow | Separate workflow | `target-selection catalog` |
 
@@ -35,6 +35,7 @@ coadds, Rubin epochs, or Rubin photometry are required. When reference photometr
 | `tables/visibility.csv` | Planning-only per-target, per-night visibility metrics |
 | `tables/observing_selection_summary.csv` and `.png` | Bright-to-faint observing-planning view with event-stage coverage |
 | `monitoring_reports/lightcurves.pdf` | Provider light curves plus follow-up and reference temporal coverage |
+| `../target_reports/<Target>_target_report.png` or `target_reports/<Target>_target_report.png` | Shared individual target dashboards, depending on the run/release root |
 | `tables/source_catalog.csv` | Target provenance by provider or survey |
 | `tables/source_updates.csv` | Sources imported or refreshed in this run |
 | `tables/mop_candidates_without_data.csv` | MOP-visible candidates excluded from analysis because neither event parameters nor photometry are available |

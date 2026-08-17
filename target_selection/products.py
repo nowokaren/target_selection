@@ -86,10 +86,21 @@ def write_product_index(
             / "lightcurves.pdf",
             "Provider light curves and follow-up/reference temporal coverage",
         ),
+        "target_reports": (
+            Path(paths.get("target_reports", run / "target_reports")),
+            "Shared folder with individual target dashboard PNGs",
+        ),
     }
+
+    def display_path(path: Path) -> str:
+        try:
+            return str(path.relative_to(run))
+        except ValueError:
+            return str(path)
+
     products = {
         name: {
-            "path": str(path.relative_to(run)),
+            "path": display_path(path),
             "description": description,
         }
         for name, (path, description) in candidates.items()

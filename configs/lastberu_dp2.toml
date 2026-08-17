@@ -46,9 +46,8 @@ reuse_cache = true
 generate_cutouts = true
 max_cutouts = 100
 cutout_size_arcsec = 20.0
-cutout_grades = ["A", "B", "C", "D", "E"]
+cutout_grades = ["A", "B"]
 cutout_bands = ["u", "g", "r", "i", "z", "y"]
-# Optional per-band FITS files: <target_id>_<band>.fits in cutouts/.
 save_cutout_fits = false
 verbose = true
 

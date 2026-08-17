@@ -45,7 +45,7 @@ later in the file. Empty lists are valid.
 
 | Keyword | Role | Typical values |
 |---|---|---|
-| `target_providers` | Candidate/event sources | `[]`, `["mop"]`, `["mop", "my_targets"]` |
+| `target_providers` | Candidate/event sources | `[]`, `["mop"]`, `["mop", "my_targets"]`. If `mop` is defined but not selected, it can still enrich follow-up or explicit targets without adding daily MOP-visible candidates. |
 | `followup_surveys` | Telescope programs being evaluated/planned | `[]`, `["casleo_hsh"]`, `["casleo_hsh", "casleo_js"]` |
 | `reference_surveys` | External contextual surveys | `[]`, `["rubin_dp2"]`, `["rubin_dp1", "rubin_dp2"]` |
 
@@ -57,6 +57,8 @@ definition and select its name in the appropriate list.
 ```toml
 [selection]
 target_data_scope = "with_data"
+# Optional explicit subset. Omit for all targets from selected sources.
+# target_names = ["OGLE-2025-BLG-1121"]
 maximum_current_magnitude = 18.5
 minimum_altitude_deg = 40.0
 minimum_observable_minutes = 90.0
@@ -68,6 +70,7 @@ observing_windows = ["20:30", "07:00"]
 | Keyword | Type/default | Allowed values and meaning |
 |---|---|---|
 | `target_data_scope` | String, default `"with_data"` | `"with_data"` retains only targets with photometry from an active target provider, imported images from an active follow-up survey, or normalized photometry from an active source. `"all"` disables this extra active-source cut. MOP-visible candidates with neither event parameters nor photometry remain diagnostic-only in `mop_candidates_without_data.csv`.  |
+| `target_names` | List, string, or omitted | Explicit target subset. When set, only these names are retained from MOP, follow-up surveys, and user target lists. Names are matched with the same canonicalization used elsewhere in the pipeline. |
 | `maximum_current_magnitude` | Float or omitted | Retain MOP events with `mag_now` at or below this faint limit. Missing magnitudes are retained. |
 | `minimum_altitude_deg` | Float, default `40.0` | Range 0–90 degrees. Altitude threshold for locally observable time. |
 | `minimum_observable_minutes` | Non-negative float, default `90.0` | Required duration satisfying astronomical night, allocation, and altitude simultaneously. |
@@ -113,11 +116,11 @@ marker_encoding = "split_color"
 
 | Keyword | Type/default | Allowed values and effect |
 |---|---|---|
-| `visibility_plots` | Boolean, `true` | Write filtered nightly visibility PNGs. |
+| `visibility_plots` | Boolean, `true` | Write filtered nightly visibility PNGs. If this, `observing_selection_summary`, `sky_maps`, and `target_report_scope = "visibility_selected"` are all disabled, local visibility is not evaluated for the run. |
 | `observing_selection_summary` | Boolean, `true` | Write the bright-to-faint visual planning table with visibility, microlensing parameters, and stage-resolved MOP/HSH/reference coverage. |
 | `sky_maps` | Boolean, `true` | Write full and bulge-zoom maps in reference-survey mode. |
 | `monitoring_report` | Boolean, `true` | Write the multipage light-curve and temporal-coverage PDF. Without a reference survey it includes MOP and configured follow-up layers only. |
-| `target_reports` | Boolean, `false` | Write individual coadd dashboards. This is an expensive stage. |
+| `target_reports` | Boolean, `false` | Write individual coadd dashboards to the shared `target_reports/` folder under the selected output/release directory. This is an expensive stage. |
 | `target_report_scope` | String, `"visibility_selected"` | `"visibility_selected"` or `"all_queried"`. |
 | `reference_photometry` | Boolean, `false` | Enable reference-survey forced photometry or published DIA light curves. Valid DIA points are added to `lightcurves.pdf`, target reports, and the target summary with per-band counts. This may be expensive. |
 | `reference_photometry_targets` | List or omitted | Named target subset. Omit while photometry is enabled to request all eligible targets. |
@@ -232,11 +235,26 @@ for the complete canonical schemas and examples.
 adapter = "rubin"
 label = "Rubin DP2"
 data_release = "DP2"
+# "coadd_forced" or "dia_forced_catalog"
+photometry_method = "coadd_forced"
 ```
 
 `data_release` selects a profile supported by `data_release_config.py`, such as
 `DP0.1`, `DP0.2`, `DP1`, or `DP2`. Multiple definitions may use the same
 adapter with different releases.
+
+`photometry_method` controls the reference points added to `lightcurves.pdf`,
+target reports, and the run tables:
+
+- `coadd_forced`: measures the target position on each available deep coadd.
+  This is the default DP2 mode and produces one measurement per coadd band.
+- `dia_forced_catalog`: matches each target to the nearest unambiguous
+  `DiaObject` and retrieves its published DIA forced-source time series.
+  Targets without a valid match remain in the output with a status explaining
+  why no curve was retrieved.
+
+The method is selected independently for each reference-survey definition, so
+runs comparing multiple collections can use different modes.
 
 ## Cache policy
 

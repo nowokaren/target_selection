@@ -41,7 +41,7 @@ surveys; local-survey photometry replaces its own shading when available.
 
 ## Individual Rubin target report
 
-With `target_reports = true`, `targets/<Target>_target_report.png` combines
+With `target_reports = true`, `target_reports/<Target>_target_report.png` combines
 deep coadds, zooms, visit statistics, target metadata, and MOP/reference
 photometry. No report is written for a target without a suitable coadd.
 

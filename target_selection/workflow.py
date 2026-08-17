@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -242,6 +242,17 @@ class AnalysisWorkflow:
             ),
             None,
         )
+        include_mop_visible_targets = primary_mop is not None
+        if primary_mop is None:
+            mop_spec = next(
+                (
+                    spec for spec in self.config.provider_specs.values()
+                    if spec.enabled and spec.adapter.lower() == "mop"
+                ),
+                None,
+            )
+            if mop_spec is not None:
+                primary_mop = self.adapters.create("target_provider", mop_spec)
         mop_client = (
             primary_mop.client(context)
             if primary_mop is not None
@@ -278,7 +289,18 @@ class AnalysisWorkflow:
                 source_name=adapter.spec.name,
                 source_role="followup_survey",
             )
-        additional_targets = _merge_targets([*additional_frames, *observed_frames])
+        explicit_targets = (
+            pd.DataFrame({"Target": list(self.config.selection.target_names)})
+            if self.config.selection.target_names
+            else pd.DataFrame()
+        )
+        if not explicit_targets.empty:
+            explicit_targets["is_user_supplied"] = True
+            explicit_targets["target_source"] = "USER"
+            explicit_targets["coordinate_priority"] = 0
+        additional_targets = _merge_targets([
+            *additional_frames, *observed_frames, explicit_targets,
+        ])
         if primary_mop is not None and not additional_targets.empty:
             # Resolve user/follow-up target names against MOP before any
             # coordinate-dependent calculation. A successful event-page match
@@ -346,6 +368,17 @@ class AnalysisWorkflow:
 
         for reference in references:
             release = reference.data_release()
+            requested_photometry_method = reference.spec.options.get("photometry_method")
+            if requested_photometry_method is not None:
+                requested_photometry_method = str(requested_photometry_method).strip().lower()
+                allowed_methods = {"coadd_forced", "dia_forced_catalog", "calexp_forced"}
+                if requested_photometry_method not in allowed_methods:
+                    raise ValueError(
+                        f"Unsupported photometry_method {requested_photometry_method!r} "
+                        f"for {reference.spec.name!r}; choose one of "
+                        f"{sorted(allowed_methods)}."
+                    )
+                release = replace(release, photometry_method=requested_photometry_method)
             combined, paths = self.runner(
                 self.config.start_date,
                 self.config.resolved_end_date,
@@ -383,11 +416,13 @@ class AnalysisWorkflow:
                 hsh_image_catalog=hsh_path,
                 refresh_hsh_data=False,
                 max_current_magnitude=self.config.selection.maximum_current_magnitude,
+                include_mop_visible_targets=include_mop_visible_targets,
                 include_previously_observed=bool(followup_adapters),
                 previously_observed_providers=followup_provider_names,
                 additional_targets=additional_targets
                 if not additional_targets.empty
                 else None,
+                target_names=self.config.selection.target_names,
                 show_queried_targets=self.config.runtime.verbose,
                 target_registry_path=database_path,
                 generate_monitoring_report=self.config.products.monitoring_report,
@@ -499,6 +534,14 @@ class AnalysisWorkflow:
             )
         result.source_updates = pd.DataFrame(updates)
         targets = _merge_targets([*provider_frames, additional_targets])
+        if self.config.selection.target_names and not targets.empty:
+            selected = {
+                canonical_target_name(name)
+                for name in self.config.selection.target_names
+            }
+            targets = targets.loc[
+                targets["Target"].map(canonical_target_name).isin(selected)
+            ].copy()
         from mop_photometry import split_mop_candidates_without_event_data
         from target_selection.data_availability import select_targets_by_data_availability
 

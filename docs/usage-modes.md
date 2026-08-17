@@ -51,8 +51,11 @@ followup_surveys = ["casleo_hsh"]
 reference_surveys = []
 ```
 
-The target union comes from the HSH inventory. This is useful for checking
-which previously monitored events are observable again.
+The target union comes from the HSH inventory. If a MOP source definition is
+present but not selected in `target_providers`, MOP is still used as an
+enrichment source for matching event parameters and photometry; its daily
+visible-target list is not added. This is useful for checking previously
+monitored events without adding new MOP candidates.
 
 ## User-supplied target list
 
@@ -117,6 +120,30 @@ photometry_path = "js_data/photometry.csv"
 The observation inventory requires `Target` and `mjd`; optional normalized
 columns include `band`, `exptime_s`, `RA_deg`, and `Dec_deg`. Photometry accepts
 `Target`, an epoch, and either magnitude or flux columns.
+
+## Functional tags
+
+The config does not need a single monolithic mode flag. These functional tags
+map to existing source selections and product switches:
+
+| Tag | What it does | Main config keys |
+|---|---|---|
+| `targets:mop-visible` | Query targets returned by MOP for the requested dates | `target_providers = ["mop"]` |
+| `targets:followup-observed` | Include events already present in HSH/JS inventories | `followup_surveys = [...]` |
+| `targets:user-list` | Analyze a user CSV target list | CSV target provider or `additional_targets` |
+| `targets:subset` | Restrict the whole run to named targets | `selection.target_names = [...]` |
+| `reference:rubin` | Add Rubin visits, coadds, sky maps, and optional photometry | `reference_surveys = ["rubin_dp2"]` |
+| `photometry:dia` | Retrieve published DIA forced-source light curves | `photometry_method = "dia_forced_catalog"` |
+| `photometry:coadd` | Measure one forced point per available coadd band | `photometry_method = "coadd_forced"` |
+| `product:visibility` | Create nightly local visibility products | `visibility_plots = true` |
+| `product:planning-table` | Create the observing-selection summary table/PNG | `observing_selection_summary = true` |
+| `product:lightcurves` | Create `lightcurves.pdf` | `monitoring_report = true` |
+| `product:sky` | Create sky maps | `sky_maps = true` |
+| `product:target-report` | Update shared individual target PNGs | `target_reports = true` |
+
+For example, a single-target DP2 report run is `targets:subset +
+reference:rubin + photometry:dia + product:target-report`, with optional
+`product:lightcurves`.
 
 ## Choose products independently
 

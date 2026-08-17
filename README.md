@@ -72,7 +72,24 @@ The first run may take time because it refreshes the configured providers and su
 
 ## Legacy low-level API
 
-`run_target_selection(...)` remains available for advanced single-Rubin-release calls and dependency injection.
+`run_target_selection(...)` remains available for advanced single-Rubin-release calls and dependency injection. To regenerate only one dashboard from an existing run and store it in a stable shared folder:
+
+```python
+from target_selection_pipeline import regenerate_target_report_from_run
+
+report_path = regenerate_target_report_from_run(
+    "outputs/2026-08-14_to_2026-08-15__obs_20-30_to_07-00",
+    "OGLE-2025-BLG-1121",
+    data_release="DP2",
+    photometry_method="dia_forced_catalog",
+    refresh_photometry=True,
+)
+print(report_path)
+```
+
+The helper reuses the run tables and persistent MOP/Rubin caches, and writes
+`outputs/target_reports/<Target>_target_report.png`. Normal runs with
+`target_reports = true` use the same shared folder and update existing PNGs.
 
 - `max_workers=4`: query concurrency.
 - `reuse_cache=True`: reuse previous downloads and queries.
@@ -80,8 +97,9 @@ The first run may take time because it refreshes the configured providers and su
 - `overwrite_target_plots=False`: keep current reports and resume an interrupted report stage; set `True` only to regenerate every report.
 - `GENERATE_TARGET_REPORTS=False`: skip individual target dashboard PNGs when only aggregate MOP/HSH products are needed; set `True` to enable them.
 - `target_plotter=False`: skip individual reports.
-- `target_report_scope="all_queried"`: generate reports for every Rubin-query target; set `"visibility_selected"` to generate them only for targets that pass the local visibility filter on at least one requested night.
+- `target_report_scope="all_queried"`: generate reports for every Rubin-query target; set `"visibility_selected"` to generate them only for targets that pass the local visibility filter on at least one requested night. PNGs are written to the shared `target_reports/` folder.
 - `target_data_scope="with_data"`: default analysis mode; keep only targets with MOP photometry, active-survey images, or active-source photometry. Set `"all"` to disable this extra active-source cut; MOP candidates with no event parameters and no photometry remain diagnostic-only.
+- `target_names=[...]`: optional explicit subset. When set, only these targets are retained from MOP, follow-up surveys, and user target lists.
 - `visibility_target_scope="all_queried"`: choose the candidate pool for nightly visibility: every queried target on every requested night; set `"mop_daily"` to use only MOP candidates returned for each night. Both scopes are subsequently filtered by the local visibility cuts, so a separate `"visibility_only"` scope would be redundant.
 - `previously_observed_providers=("HSH", "JS")`: choose which registered local surveys contribute previously observed targets; use a subset such as `("HSH",)`.
 - `additional_targets=...`: add a pandas DataFrame or CSV path with `Target`, `RA_deg`, and `Dec_deg`; these targets join the Rubin query and, by default, nightly visibility evaluation.
@@ -89,7 +107,7 @@ The first run may take time because it refreshes the configured providers and su
 - `sky_marker_encoding="color_size"`: encode magnitude with color and total visits with marker size.
 - `show_coverage_background=True`: query and display a muted, low-resolution visit-density layer for the selected Data Release.
 - `coverage_resolution=19`: control the coarse background grid; 19 approximately matches one LSSTCam field of view per cell.
-- `generate_visibility_plots=True`: create one local visibility plot per requested night.
+- `generate_visibility_plots=True`: create one local visibility plot per requested night. If visibility plots, observing-selection summary, sky maps, and `target_report_scope="visibility_selected"` are all disabled, local visibility is skipped entirely.
 - `visibility_minimum_altitude=40`: minimum altitude, approximately equivalent to airmass below 1.5.
 - `visibility_minimum_observable_minutes=90`: required time above the altitude threshold during allocated astronomical night.
 - `visibility_time_step_minutes=1`: temporal sampling of visibility curves.
@@ -111,7 +129,7 @@ When an HSH catalogue is supplied, the pipeline uses science images with success
 
 Future JS data can be inserted through `TargetRegistry.import_survey_observations("JS", frame)`, where `frame` has at least `Target` and `mjd`; optional normalized fields include `band`, `exptime_s`, `usable`, `RA_deg`, and `Dec_deg`. Its epochs then enter both the target union and the monitoring PDF automatically, regardless of the `usable` flag. The lower-level `create_monitoring_report(..., observatory_photometry=...)` also accepts normalized HSH/JS photometry (`Target`, `provider`, `mjd` or `Timestamp`, magnitude, optional error and band); when present, points replace that provider's epoch shading.
 
-For Early DP2, the pipeline runs Rubin `ForcedMeasurementTask` with the `base_PsfFlux` plugin at each target coordinate on every available deep coadd. This provides one PSF measurement per target and coadd band without requiring a DIA detection or unavailable individual calibrated visit images. The plotted coadd point uses the median MJD of the TAP coverage rows in its band as a representative horizontal position. `outputs/rubin_photometry/<Target>.csv` is the persistent per-target cache; it preserves rows from distinct data releases or collections, while `tables/release_forced_photometry.csv` is the snapshot used by one run.
+Reference photometry is selectable per Rubin collection with `photometry_method` in the reference-survey definition. `coadd_forced` (the DP2 default) runs Rubin `ForcedMeasurementTask` with the `base_PsfFlux` plugin at each target coordinate on every available deep coadd. This provides one PSF measurement per target and coadd band without requiring a DIA detection or unavailable individual calibrated visit images. `dia_forced_catalog` instead matches each target to the nearest unambiguous `DiaObject` and retrieves its published `ForcedSourceOnDiaObject` time series through TAP. In either mode, the resulting points are added to `lightcurves.pdf`, target reports, and `tables/release_forced_photometry.csv`; per-target cache files are stored in `outputs/rubin_photometry/<Target>.csv`.
 
 The release-wide visit-center query is executed only when the background is enabled. Its result is cached as `release_visit_centers.csv`, so later runs do not query the complete release again. The layer is an approximate visualization of total visit density, not an exact detector-footprint map.
 
@@ -197,6 +215,9 @@ outputs/
 ├── mop_photometry/                     # One MOP photometry CSV per target
 ├── mop_event_cache/                    # MOP event-data cache
 ├── _cache/release_coverage/            # Shared TAP coverage cache across schedules
+├── target_reports/                     # Shared individual target dashboards
+│   ├── <Target>_target_report.png
+│   └── report_versions.json            # Report cache control
 └── YYYY-MM-DD_to_YYYY-MM-DD__obs_HH-MM_to_HH-MM/
     ├── manifest.json                   # Run configuration and metadata
     ├── plot_errors.csv                 # Isolated report errors
@@ -220,11 +241,8 @@ outputs/
     ├── sky_plots/                      # Full-sky and bulge maps
     ├── monitoring_reports/
     │   └── lightcurves.pdf  # Optional MOP curves with DP2/HSH/JS epochs and t0 ± 2tE zooms
-    ├── visibility_plots/               # Automatically filtered nightly plots
-    │   └── visibility_selection.csv    # Metrics, decisions, and rejection reasons
-    └── targets/
-        ├── <Target>_target_report.png  # Individual report
-        └── report_versions.json        # Report cache control
+    └── visibility_plots/               # Automatically filtered nightly plots
+        └── visibility_selection.csv    # Metrics, decisions, and rejection reasons
 ```
 
 The run directory includes the default observing window. A schedule with per-night overrides uses `__obs_<default>_varied-<hash>`; the full schedule remains in `manifest.json`. Other Data Releases add a directory named after the release. The persistent local registry is stored at `outputs/target_database/target_selection.sqlite`; it tracks target identities, HSH/JS epochs, and daily provider refresh state. Raw MOP, Rubin, and local-survey source files remain in their respective caches rather than being duplicated in the database. The release-coverage cache is shared, so changing only the observing schedule does not repeat compatible TAP coverage queries.

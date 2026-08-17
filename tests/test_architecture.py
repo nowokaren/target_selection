@@ -56,7 +56,7 @@ def test_workflow_runs_multiple_reference_surveys(tmp_path):
     calls = []
 
     def runner(start_date, end_date, **kwargs):
-        calls.append(kwargs["data_release"].name)
+        calls.append((kwargs["data_release"].name, kwargs["data_release"].photometry_method))
         run = tmp_path / kwargs["data_release"].name
         tables = run / "tables"
         tables.mkdir(parents=True)
@@ -79,7 +79,10 @@ def test_workflow_runs_multiple_reference_surveys(tmp_path):
         provider_specs={"mop": SourceSpec("mop", "mop")},
         reference_specs={
             "dp1": SourceSpec("dp1", "rubin", options={"data_release": "DP1"}),
-            "dp2": SourceSpec("dp2", "rubin", options={"data_release": "DP2"}),
+            "dp2": SourceSpec(
+                "dp2", "rubin",
+                options={"data_release": "DP2", "photometry_method": "dia_forced_catalog"},
+            ),
         },
         products=ProductSettings(
             visibility_plots=False,
@@ -92,7 +95,7 @@ def test_workflow_runs_multiple_reference_surveys(tmp_path):
         clients={"mop": object()},
         runner=runner,
     ).run()
-    assert calls == ["DP1", "DP2"]
+    assert calls == [("DP1", "calexp_forced"), ("DP2", "dia_forced_catalog")]
     assert set(result.runs) == {"dp1", "dp2"}
     assert (tmp_path / "DP1" / "analysis_config.json").exists()
     assert (tmp_path / "DP2" / "tables" / "source_updates.csv").exists()

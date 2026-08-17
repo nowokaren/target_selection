@@ -58,8 +58,10 @@ outputs/<date-range-and-observing-window>/
 ├── tables/
 ├── visibility_plots/
 ├── monitoring_reports/
-├── sky_plots/
-└── targets/
+└── sky_plots/
+
+outputs/target_reports/
+└── <Target>_target_report.png
 ```
 
 Planning-only runs are stored below `outputs/planning_only/`.

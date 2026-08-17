@@ -19,6 +19,12 @@ from astropy.coordinates import AltAz, EarthLocation, SkyCoord, get_body
 from astropy.time import Time
 from astropy.utils import iers
 
+# RSP notebook environments may have an offline/stale IERS table. Visibility
+# calculations only need a stable Earth-orientation fallback, so do not fail
+# when dates extend beyond the table's predictive range.
+iers.conf.auto_download = False
+iers.conf.auto_max_age = None
+
 
 VISIBILITY_PLOT_VERSION = 27
 
@@ -60,6 +66,8 @@ def _night_times(
     location: EarthLocation | None = None,
 ) -> tuple[pd.DatetimeIndex, Time]:
     """Return a civil-twilight-to-dawn grid, extended for later assigned time."""
+    iers.conf.auto_download = False
+    iers.conf.auto_max_age = None
     night_date = pd.Timestamp(night).date()
     fallback_start = pd.Timestamp(f"{night_date} 18:00", tz=timezone)
     if location is None:
@@ -260,6 +268,7 @@ def evaluate_nightly_visibility(
         local_times, night, timezone, observing_windows,
     )
     iers.conf.auto_download = False
+    iers.conf.auto_max_age = None
     frame = AltAz(obstime=times, location=location)
     sun_altitude = get_body("sun", times, location=location).transform_to(frame).alt.degree
     astronomical_night = sun_altitude < -18
@@ -360,6 +369,7 @@ def plot_nightly_visibility(
         local_times, night, timezone, observing_windows,
     )
     iers.conf.auto_download = False
+    iers.conf.auto_max_age = None
     # Restrict the plotted interval to twilight and nighttime.  The time grid
     # may extend to an allocated end time after sunrise, but daytime is not
     # useful for this visibility view and should never appear on the x-axis.
@@ -798,6 +808,7 @@ def plot_visibility_sequence(
 
     location, timezone, observatory_name = get_observatory(observatory)
     iers.conf.auto_download = False
+    iers.conf.auto_max_age = None
     target_names = list(dict.fromkeys(data.get("Target", pd.Series(dtype=str)).astype(str)))
     palette = np.vstack([
         plt.get_cmap(name)(np.arange(20))

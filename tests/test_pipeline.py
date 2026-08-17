@@ -321,6 +321,43 @@ def test_pipeline_queries_visible_and_previously_observed_targets(tmp_path):
     assert (paths["tables"] / "observing_selection_summary.png").exists()
 
 
+def test_pipeline_can_limit_run_to_named_targets(tmp_path):
+    hsh = pd.DataFrame({
+        "filename": ["old_i_wcs.fits"], "object": ["OGLE-2025-BLG-0001"],
+        "imagetyp": ["object"], "astromet": ["yes"], "obj_stat": ["OK"],
+        "clmatch": [True], "mjd-obs": [60000.0], "filter": ["(5) I"],
+        "exptime": [300.0], "airmass": [1.2],
+        "crval1": [269.563841528], "crval2": [-19.998130225],
+    })
+    hsh_path = tmp_path / "hsh.csv"
+    hsh.to_csv(hsh_path, index=False)
+    tap = _FakeTapService(pd.DataFrame({
+        "visitId": [1], "expMidptMJD": [60000.0], "band": ["i"],
+        "detector": [2], "seeing": [0.8], "magLim": [24.0],
+    }))
+    mop_cache = tmp_path / "outputs" / "mop_photometry"
+    mop_cache.mkdir(parents=True)
+    pd.DataFrame({"Timestamp": ["2026-08-01T00:00:00Z"]}).to_csv(
+        mop_cache / "visible-event.csv", index=False
+    )
+
+    combined, paths = run_target_selection(
+        "2026-08-01", data_release="DP2", root_dir=tmp_path / "outputs",
+        mop=_FakeMop(), tap_service=tap, target_plotter=False,
+        generate_visibility_plots=False, generate_sky_maps=False,
+        generate_observing_selection_summary=False, target_report_scope="all_queried",
+        hsh_image_catalog=hsh_path, target_names=["visible-event"],
+        visibility_time_step_minutes=60, max_workers=1, verbose=False,
+    )
+
+    assert combined["Target"].tolist() == ["visible-event"]
+    assert pd.read_csv(paths["tables"] / "queried_targets.csv")["Target"].tolist() == ["visible-event"]
+    assert pd.read_csv(paths["tables"] / "visible_targets_daily.csv")["Target"].tolist() == ["visible-event"]
+    assert not (paths["visibility_plots"] / "visibility_selection.csv").exists()
+    manifest = pd.read_json(paths["run"] / "manifest.json", typ="series")
+    assert not bool(manifest["visibility_evaluated"])
+
+
 def test_magnitude_cut_discards_faint_targets_but_keeps_missing_values():
     targets = pd.DataFrame({"Target": ["bright", "faint", "unknown"], "mag_now": [16.0, 19.0, None]})
     filtered, excluded = _filter_invalid_mop_magnitudes(targets, max_current_magnitude=18.0)

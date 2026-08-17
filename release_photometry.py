@@ -23,12 +23,13 @@ FORCED_PHOTOMETRY_COLUMNS = [
     "band", "dataset_type", "inst_flux", "inst_flux_err", "magnitude",
     "magnitude_err", "measurement_flag", "measurement_status", "message",
     "data_release", "butler_collection", "measurement_method", "diaObjectId",
-    "dia_match_sep_arcsec", "direct_flux_njy", "direct_flux_err_njy",
+    "dia_match_sep_arcsec", "dia_object_ra_deg", "dia_object_dec_deg",
+    "direct_flux_njy", "direct_flux_err_njy",
     "direct_flux_flag", "difference_flux_njy", "difference_flux_err_njy",
     "difference_flux_flag", "tract", "patch", "coadd_epoch_mjd",
     "epoch_definition",
 ]
-FORCED_PHOTOMETRY_VERSION = 5
+FORCED_PHOTOMETRY_VERSION = 6
 
 
 def _empty_forced_photometry() -> pd.DataFrame:
@@ -495,6 +496,14 @@ def query_dia_forced_photometry(
             # a row containing RA/Dec to float and silently rounds large IDs.
             selected_index = objects.index[int(np.nanargmin(separation))]
             dia_object_id = int(objects.at[selected_index, "diaObjectId"])
+            dia_object_ra = float(objects.at[selected_index, "ra"])
+            dia_object_dec = float(objects.at[selected_index, "dec"])
+            match_metadata = {
+                "diaObjectId": dia_object_id,
+                "dia_match_sep_arcsec": float(np.nanmin(separation)),
+                "dia_object_ra_deg": dia_object_ra,
+                "dia_object_dec_deg": dia_object_dec,
+            }
             forced = _tap_to_frame(tap_service, f"""
                 SELECT fs.diaObjectId AS diaObjectId, fs.visit AS visitId, fs.detector AS detector,
                        fs.band AS band, fs.psfFlux AS direct_flux_njy,
@@ -510,8 +519,7 @@ def query_dia_forced_photometry(
                   AND fs.diaObjectId = {dia_object_id}
             """)
             if forced.empty:
-                return pd.DataFrame([{**provenance, "diaObjectId": dia_object_id,
-                                      "dia_match_sep_arcsec": float(np.nanmin(separation)),
+                return pd.DataFrame([{**provenance, **match_metadata,
                                       "measurement_status": "dia_object_without_forced_sources",
                                       "message": "Matched DiaObject has no forced-source rows."}])
             forced["magnitude"], forced["magnitude_err"] = _nanojansky_to_magnitude(
@@ -524,7 +532,8 @@ def query_dia_forced_photometry(
             forced["message"] = ""
             for key, value in provenance.items():
                 forced[key] = value
-            forced["dia_match_sep_arcsec"] = float(np.nanmin(separation))
+            for key, value in match_metadata.items():
+                forced[key] = value
             return forced
         except Exception as exc:
             return pd.DataFrame([{**provenance, "measurement_status": "tap_query_error", "message": str(exc)}])

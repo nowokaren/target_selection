@@ -54,6 +54,7 @@ class SelectionSettings:
     """Frequently changed scientific and feasibility cuts."""
 
     target_data_scope: str = "with_data"
+    target_names: tuple[str, ...] | None = None
     maximum_current_magnitude: float | None = None
     minimum_altitude_deg: float = 40.0
     minimum_observable_minutes: float = 90.0
@@ -223,6 +224,10 @@ class AnalysisConfig:
             name: SourceSpec.from_mapping(name, spec)
             for name, spec in values.get("reference_surveys", {}).items()
         }
+        selection = dict(values.get("selection", {}))
+        if "target_names" in selection:
+            names = _tuple(selection["target_names"])
+            selection["target_names"] = names or None
         products = dict(values.get("products", {}))
         if "monitoring_layers" in products:
             products["monitoring_layers"] = _tuple(products["monitoring_layers"])
@@ -244,7 +249,7 @@ class AnalysisConfig:
             provider_specs=providers,
             followup_specs=followups,
             reference_specs=references,
-            selection=SelectionSettings(**values.get("selection", {})),
+            selection=SelectionSettings(**selection),
             products=ProductSettings(**products),
             cache=CacheSettings(**values.get("cache", {})),
             runtime=RuntimeSettings(**values.get("runtime", {})),

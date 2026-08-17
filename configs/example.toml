@@ -3,9 +3,9 @@
 
 # Frequently changed run inputs. Omit end_date for a single night.
 [run]
-name = ""
-start_date = "2026-08-01"
-end_date = "2026-08-15"
+name = "hsh_2years"
+start_date = "2026-08-09"
+end_date = "2026-08-12"
 observatory = "El Leoncito"
 output_dir = "outputs"
 
@@ -13,12 +13,14 @@ output_dir = "outputs"
 [sources]
 target_providers = ["mop"]
 followup_surveys = ["casleo_hsh"]
-reference_surveys = [] # ["rubin_dp2"]
+reference_surveys = ["rubin_dp2"]
 
 [selection]
 # "with_data" (default): analyze only targets with MOP photometry, active-survey images, or active-source photometry.
 # "all": disable this extra active-source cut; MOP candidates without any event data remain diagnostic-only.
 target_data_scope = "with_data"
+# Optional explicit subset. When set, only these names are queried/reported.
+# target_names = ["OGLE-2025-BLG-1121", "Gaia24bsi"]
 # Missing MOP magnitudes are retained; omit this keyword for no faint limit.
 maximum_current_magnitude = 18.5
 minimum_altitude_deg = 40.0
@@ -38,13 +40,13 @@ observing_selection_summary = true
 sky_maps = true
 monitoring_report = true
 # Target reports and reference photometry are the expensive optional stages.
-target_reports = false
+target_reports = true
 # "visibility_selected" or "all_queried"
 target_report_scope = "visibility_selected"
-reference_photometry = false
+reference_photometry = true
 # Omit for all eligible targets, or uncomment to request a subset.
 # reference_photometry_targets = ["OGLE-2026-BLG-0001"]
-coverage_background = false
+coverage_background = true
 # "split_color" or "color_size"
 marker_encoding = "split_color"
 monitoring_layers = [
@@ -86,6 +88,10 @@ adapter = "rubin"
 label = "Rubin DP2"
 capabilities = ["visits", "images", "photometry"]
 data_release = "DP2"
+# Choose how Rubin photometry is added to target reports and lightcurves.pdf:
+# "coadd_forced" measures the target position on each available deep coadd;
+# "dia_forced_catalog" matches to DiaObject and retrieves its DIA forced-source curve.
+photometry_method = "dia_forced_catalog"
 
 # Less frequently changed cache policy.
 [cache]
@@ -100,8 +106,8 @@ refresh_followup_surveys = false
 max_workers = 4
 verbose = true
 overwrite_visibility_plots = true
-overwrite_target_reports = false
-overwrite_reference_photometry = false
+overwrite_target_reports = true
+overwrite_reference_photometry = true
 monitoring_plots_per_page = 3
 # Coarse coverage-background grid; larger values use smaller cells.
 coverage_resolution = 19
