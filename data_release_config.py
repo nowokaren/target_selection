@@ -87,8 +87,9 @@ RELEASES: dict[str, DataReleaseConfig] = {
     ),
     "DP1": DataReleaseConfig(
         name="DP1", rsp_instance="dp1", butler_repo="dp1",
-        butler_collections=None, tap_visit_table="dp1.CcdVisit",
+        butler_collections="LSSTComCam/DP1", tap_visit_table="dp1.CcdVisit",
         visit_columns=_CCD_VISIT_COLUMNS,
+        calexp_dataset_types=("visit_image",),
         coadd_dataset_types=("deep_coadd", "deepCoadd"),
         coadd_spatial_where="patch.region OVERLAPS POINT(:ra,:dec)",
         notes="Collection defaults can differ by RSP deployment; override when needed.",
