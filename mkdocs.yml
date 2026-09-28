@@ -33,6 +33,7 @@ nav:
   - Version 2 tools inventory: v2-tools.md
   - Version 2 seasonal workflow: v2-seasonal-workflow.md
   - Version 2 usage notebooks: usage-notebooks.md
+  - OGLE and OPM providers: providers-ogle-opm.md
   - Large reference catalogs: reference-catalog.md
   - Python and CLI API: api.md
   - Terminal visibility reports: visibility-cli.md

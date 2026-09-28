@@ -39,6 +39,12 @@ class ProviderHandle:
     def describe(self) -> dict[str, Any]:
         return {"name": self.name, "kind": self.kind, "features": list(self.features)}
 
+    def photometry(self, targets: pd.DataFrame, **kwargs) -> pd.DataFrame:
+        raise NotImplementedError(f"Provider {self.name!r} does not implement photometry.")
+
+    def epochs(self, targets: pd.DataFrame, **kwargs) -> pd.DataFrame:
+        raise NotImplementedError(f"Provider {self.name!r} does not implement epochs.")
+
     def load_targets(self, *, filters: dict[str, Any] | None = None, **kwargs) -> pd.DataFrame:
         if self._loader is None:
             raise NotImplementedError(f"Provider {self.name!r} does not implement target loading.")
@@ -148,6 +154,17 @@ def default_data_sources() -> DataSourceRegistry:
     registry.register(ProviderHandle("hsh", "survey", ("targets",), lambda **kwargs: __import__("target_selection.target_io", fromlist=["load"]).load("hsh_events", filters=kwargs.get("filters"))))
     registry.register(MOPHandle())
     registry.register(RubinHandle())
+    from .sources.ogle import OGLEAdapter
+    from .sources.opm import OPMAdapter
+    ogle = OGLEAdapter()
+    opm = OPMAdapter()
+    registry.register(ProviderHandle("ogle", "survey", ogle.features, ogle.load_targets))
+    registry.register(ProviderHandle("opm", "tom", opm.features, opm.load_targets))
+    registry.get("ogle").photometry = ogle.photometry
+    registry.get("ogle").epochs = ogle.epochs
+    registry.get("opm").ranking = opm.ranking
+    registry.get("opm").login = opm.login
+    registry.get("opm").private_targets = opm.private_targets
     return registry
 
 
