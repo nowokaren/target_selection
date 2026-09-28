@@ -21,6 +21,7 @@ class ProviderHandle:
     kind: str
     features: tuple[str, ...] = ()
     _loader: Callable[..., pd.DataFrame] | None = field(default=None, repr=False)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def capabilities(self) -> tuple[str, ...]:
@@ -37,7 +38,9 @@ class ProviderHandle:
         return self
 
     def describe(self) -> dict[str, Any]:
-        return {"name": self.name, "kind": self.kind, "features": list(self.features)}
+        description = {"name": self.name, "kind": self.kind, "features": list(self.features)}
+        description.update(self.metadata)
+        return description
 
     def photometry(self, targets: pd.DataFrame, **kwargs) -> pd.DataFrame:
         raise NotImplementedError(f"Provider {self.name!r} does not implement photometry.")
@@ -158,8 +161,8 @@ def default_data_sources() -> DataSourceRegistry:
     from .sources.opm import OPMAdapter
     ogle = OGLEAdapter()
     opm = OPMAdapter()
-    registry.register(ProviderHandle("ogle", "survey", ogle.features, ogle.load_targets))
-    registry.register(ProviderHandle("opm", "tom", opm.features, opm.load_targets))
+    registry.register(ProviderHandle("ogle", "survey", ogle.features, ogle.load_targets, metadata=ogle.describe()))
+    registry.register(ProviderHandle("opm", "tom", opm.features, opm.load_targets, metadata=opm.describe()))
     registry.get("ogle").photometry = ogle.photometry
     registry.get("ogle").epochs = ogle.epochs
     registry.get("opm").ranking = opm.ranking
