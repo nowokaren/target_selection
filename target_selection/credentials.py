@@ -47,10 +47,16 @@ def _keyring_module():
 
 def _get_keyring(provider: str) -> Credentials | None:
     keyring = _keyring_module()
-    username = keyring.get_password(f"{KEYRING_SERVICE}/username", provider)
+    try:
+        username = keyring.get_password(f"{KEYRING_SERVICE}/username", provider)
+    except Exception as exc:
+        raise RuntimeError("No usable keyring backend is available on this machine.") from exc
     if not username:
         return None
-    password = keyring.get_password(KEYRING_SERVICE, f"{provider}:{username}")
+    try:
+        password = keyring.get_password(KEYRING_SERVICE, f"{provider}:{username}")
+    except Exception as exc:
+        raise RuntimeError("No usable keyring backend is available on this machine.") from exc
     if not password:
         return None
     return Credentials(username, password, "keyring")
@@ -117,9 +123,15 @@ def set_credentials(provider: str, username: str, password: str, *, backend: Lit
     if not username or not password:
         raise ValueError("Username and password cannot be empty.")
     if backend == "keyring":
-        keyring = _keyring_module()
-        keyring.set_password(f"{KEYRING_SERVICE}/username", provider, username)
-        keyring.set_password(KEYRING_SERVICE, f"{provider}:{username}", password)
+        try:
+            keyring = _keyring_module()
+            keyring.set_password(f"{KEYRING_SERVICE}/username", provider, username)
+            keyring.set_password(KEYRING_SERVICE, f"{provider}:{username}", password)
+        except Exception as exc:
+            raise RuntimeError(
+                "No usable keyring backend is available. "
+                "Retry with --backend netrc on this headless server."
+            ) from exc
         return
     path = Path(netrc_path).expanduser() if netrc_path else Path.home() / ".netrc"
     with path.open("a", encoding="utf-8") as handle:

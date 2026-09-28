@@ -56,7 +56,11 @@ def main(argv: list[str] | None = None) -> int:
             from getpass import getpass
             username = input(f"{args.provider} username: ")
             password = getpass(f"{args.provider} password: ")
-            set_credentials(args.provider, username, password, backend=args.backend)
+            try:
+                set_credentials(args.provider, username, password, backend=args.backend)
+            except RuntimeError as exc:
+                print(f"Credential storage failed: {exc}", file=sys.stderr)
+                return 2
             print(f"Credentials stored using {args.backend}.")
             return 0
         if args.auth_command == "test":
