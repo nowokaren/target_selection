@@ -18,8 +18,6 @@ from target_selection.sources import default_adapter_registry
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="target-selection")
     commands = parser.add_subparsers(dest="command", required=True)
-    run = commands.add_parser("run", help="Run an analysis from TOML or JSON")
-    run.add_argument("--config", required=True)
     validate = commands.add_parser(
         "validate-config", help="Validate a configuration file"
     )
@@ -56,13 +54,7 @@ def main(argv: list[str] | None = None) -> int:
             load_config(args.config)
         print(f"Configuration is valid: {args.config}")
         return 0
-    config = load_config(args.config)
-    from target_selection.workflow import run_analysis
-
-    result = run_analysis(config)
-    for name, run in result.runs.items():
-        print(f"{name}: {run.paths['run']}")
-    return 0
+    raise SystemExit(f"Unknown command: {args.command}")
 
 
 if __name__ == "__main__":  # pragma: no cover

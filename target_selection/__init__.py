@@ -36,7 +36,6 @@ from .tasks import (
     create_target_reports,
     create_lightcurve_plots,
     create_lightcurves_report,
-    run_target_selection_tasks,
     import_hsh_inventory,
     observed_targets,
 )
@@ -56,7 +55,6 @@ from .reference_catalog import (
 __all__ = [
     "observed_targets",
     "import_hsh_inventory",
-    "run_target_selection_tasks",
     "create_lightcurves_report",
     "create_target_reports",
     "create_lightcurve_plots",
@@ -114,12 +112,3 @@ __all__ = [
     "visibility",
 ]
 
-
-def __getattr__(name: str):
-    # Keep catalog-only and configuration-only commands usable when optional
-    # root-level workflow modules are not installed in the current environment.
-    if name in {"AnalysisResult", "run_analysis"}:
-        from .workflow import AnalysisResult, run_analysis
-
-        return {"AnalysisResult": AnalysisResult, "run_analysis": run_analysis}[name]
-    raise AttributeError(name)
