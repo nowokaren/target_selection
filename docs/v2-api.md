@@ -4,6 +4,11 @@ The API is organized by the operation being performed. A normal analysis uses
 small functions with explicit inputs and outputs rather than one large
 pipeline function.
 
+The normalized input and output contracts are defined in the [data contracts
+guide](contracts/README.md). This page describes the current transitional API;
+some examples still expose compatibility names while provider adapters are
+being migrated to the v0.1 contracts.
+
 ## Load targets
 
 ```python
@@ -15,7 +20,7 @@ catalog = target_io.load(
 )
 ```
 
-The configured source returns a canonical table containing at least:
+The configured source should return a canonical table containing at least:
 
 ```text
 target_id, ra_deg, dec_deg, source
@@ -67,7 +72,10 @@ events = target_io.add_data(
 )
 ```
 
-The provider uses the existing `MOPClient.enrich_microlensing_parameters` method, caches one record per target, and maps MOP-specific names such as `mop_mag_now` to the canonical v2 field `magnitude`.
+The current compatibility implementation still exposes historical names in
+some notebooks. The v0.1 contract uses `t0_hjd`, `tE_days`, `u0`,
+`magnitude_last` and `epoch_last_hjd`; adapters should normalize to those names
+before data are written to `targets.csv`.
 
 ## Add optional data
 

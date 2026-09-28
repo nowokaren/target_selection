@@ -8,7 +8,19 @@ Read the [integrated workflow diagram](v2-architecture.md) first. It shows four 
 
 The key idea is that loading targets and producing reports are separate decisions. The same selected catalog can be used for visibility, Rubin matching, photometry, or several analyses.
 
-## 2. Learn the public entry points
+## 2. Learn the normalized contracts
+
+Before reading provider implementations, read the [data contracts](contracts/README.md).
+They define the row grain, canonical column names, units, missing-value rules
+and provenance requirements for targets, observations, visibility, coverage
+and priority products.
+
+In particular, `targets.csv` contains preselected candidates, not the final
+scientific observing decision. `observations.csv` combines epochs with any
+available photometry, while visibility and priority remain separate derived
+tables.
+
+## 3. Learn the public entry points
 
 Read [Version 2 API](v2-api.md), then inspect these modules in order:
 
@@ -18,7 +30,7 @@ Read [Version 2 API](v2-api.md), then inspect these modules in order:
 
 The public API is intentionally small. Source-specific queries belong to adapters or collection access. The older `match.py` and `images.py` wrappers are compatibility helpers, not required concepts for new notebooks.
 
-## 3. Understand sources and adapters
+## 4. Understand sources and adapters
 
 Read [Catalog sources and adapters](source-adapters.md), then inspect:
 
@@ -28,7 +40,7 @@ Read [Catalog sources and adapters](source-adapters.md), then inspect:
 
 Use `target_io.list_sources()`, `target_io.describe_source()`, `target_io.list_adapters()` and `target_io.describe_adapter()` while exploring.
 
-## 4. Follow one complete example
+## 5. Follow one complete example
 
 Run the notebooks in this order:
 
@@ -41,7 +53,7 @@ Run the notebooks in this order:
 
 The first three cover the core HSH/JS seasonal workflow. The fourth covers the photometry branch, and the fifth shows where a provider such as OGLE belongs.
 
-## 5. Read the implementation behind each operation
+## 6. Read the implementation behind each operation
 
 For visibility, use the public module `target_selection.visibility`: `evaluate`, `plots` and `sequence`. Its implementation is currently delegated to `target_selection/tasks/visibility.py`.
 
@@ -49,7 +61,7 @@ For Rubin access, inspect `target_selection/rsp_access.py` and `CollectionContex
 
 For photometry, inspect `target_selection/sources/lsst.py` and the light-curve helpers in `target_selection/tasks/reports.py`.
 
-## 6. Read historical implementation last
+## 7. Read historical implementation last
 
 When reproducing or auditing an older analysis, inspect:
 
@@ -61,6 +73,6 @@ When reproducing or auditing an older analysis, inspect:
 
 These contain useful mature logic, but new source-specific branches should start from the public API.
 
-## 7. Verify results and provenance
+## 8. Verify results and provenance
 
 For every analysis, inspect the source configuration, selected-target table, cache paths, output tables, plots, cutouts and report. Preserve source, provider, collection and configuration information with the results.

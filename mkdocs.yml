@@ -21,6 +21,14 @@ nav:
   - Product examples: examples.md
   - Version 2 architecture: v2-architecture.md
   - Version 2 API: v2-api.md
+  - Version 2 data contracts:
+      - Overview: contracts/README.md
+      - Targets: contracts/targets.md
+      - Observations: contracts/observations.md
+      - Visibility: contracts/visibility.md
+      - Coverage: contracts/coverage.md
+      - Priority: contracts/priority.md
+      - Provider interface: contracts/provider-interface.md
   - Version 2 reading guide: v2-reading-guide.md
   - Version 2 tools inventory: v2-tools.md
   - Version 2 seasonal workflow: v2-seasonal-workflow.md
