@@ -25,6 +25,7 @@ target-selection = "target_selection.cli:main"
 test = ["pytest>=8"]
 docs = ["mkdocs>=1.6,<2"]
 interactive = ["prompt_toolkit>=3.0"]
+credentials = ["keyring>=25"]
 
 [tool.setuptools]
 py-modules = ["target_selection_pipeline", "data_release_config", "mop_photometry", "release_photometry", "target_report", "visibility_plotter", "observatory_observations", "target_registry", "monitoring_report", "target_region"]

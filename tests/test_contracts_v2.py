@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from target_selection.contracts import ContractError, normalize_observations, normalize_targets, validate_targets
+from target_selection.credentials import get_credentials, set_credentials
 from target_selection.data_source import data_source
 
 
@@ -30,3 +31,11 @@ def test_public_provider_registry_is_lazy():
     assert data_source.mop.kind == "tom"
     assert data_source.hsh.kind == "survey"
     assert data_source.lsst.supports("coverage")
+
+
+def test_credentials_can_use_a_private_netrc(tmp_path):
+    path = tmp_path / ".netrc"
+    set_credentials("opm", "alice", "secret", backend="netrc", netrc_path=path)
+    credentials = get_credentials("opm", backend="netrc", netrc_path=path)
+    assert credentials.username == "alice"
+    assert credentials.password == "secret"

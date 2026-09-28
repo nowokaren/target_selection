@@ -72,8 +72,18 @@ parser remains intentionally pending inspection with an authorized account:
 session = data_source.opm.login()
 ```
 
-Credentials are read from `TARGET_SELECTION_OPM_USERNAME` and
-`TARGET_SELECTION_OPM_PASSWORD`, or passed explicitly at runtime. They are
-never stored in the repository.
+For persistent, cross-platform setup, install the optional credentials
+dependency and run:
+
+```bash
+pip install -e '.[credentials]'
+target-selection auth set opm
+target-selection auth test opm
+```
+
+The default backend is the operating-system credential store through
+`keyring`. On a headless server without a usable keyring backend, use the
+environment variables or `.netrc` fallback. Credentials are never stored in
+the repository or in a notebook.
 
 Source: [Galactic Science OPM](https://lensingtom.zah.uni-heidelberg.de/).

@@ -16,6 +16,7 @@ import pandas as pd
 import requests
 
 from ..contracts import normalize_targets, validate_targets
+from ..credentials import get_credentials
 
 
 OPM_URL = "https://lensingtom.zah.uni-heidelberg.de"
@@ -101,10 +102,14 @@ class OPMAdapter:
         ``TARGET_SELECTION_OPM_PASSWORD``. The password is never written to a
         config file or returned by this method.
         """
-        username = username or os.getenv("TARGET_SELECTION_OPM_USERNAME")
-        password = password or os.getenv("TARGET_SELECTION_OPM_PASSWORD")
+        stored = None
         if not username or not password:
-            raise ValueError("OPM login requires username/password arguments or TARGET_SELECTION_OPM_* environment variables.")
+            stored = get_credentials("opm", interactive=False)
+        username = username or (stored.username if stored else None)
+        password = password or (stored.password if stored else None)
+        if not username or not password:
+            stored = get_credentials("opm", backend="prompt", interactive=True)
+            username, password = stored.username, stored.password
         login_url = f"{self.base_url}/accounts/login/"
         page = self.session.get(login_url, timeout=self.timeout)
         page.raise_for_status()

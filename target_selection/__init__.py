@@ -12,6 +12,7 @@ from .contracts import (
     validate_targets,
     validate_visibility,
 )
+from .credentials import Credentials, get_credentials, remove_credentials, set_credentials
 from .data_source import DataSourceRegistry, ProviderHandle, data_source
 from .target_io import describe_adapter, describe_source, list_adapters, list_sources
 from .products import plot_sky_dual_metric
@@ -133,4 +134,8 @@ __all__ = [
     "validate_contract",
     "DataSourceRegistry",
     "ProviderHandle",
+    "Credentials",
+    "get_credentials",
+    "set_credentials",
+    "remove_credentials",
 ]
