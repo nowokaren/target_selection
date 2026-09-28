@@ -65,6 +65,9 @@ class MOPHandle(ProviderHandle):
         from .sources.mop import load_event_data
         return load_event_data(targets, fields=fields, **kwargs)
 
+    def visible_targets(self, *, observatory: str = "El Leoncito", start_date: str, end_date: str | None = None, **kwargs) -> pd.DataFrame:
+        return self.load_targets(observatory=observatory, start_date=start_date, end_date=end_date, **kwargs)
+
 
 class RubinHandle(ProviderHandle):
     def __init__(self, collection: str = "DP2") -> None:
@@ -98,6 +101,18 @@ class RubinHandle(ProviderHandle):
     def get_image(self, targets, *, kind: str = "coadd", **kwargs):
         return self.collection.get_image(targets, image_type=kind, **kwargs)
 
+    def photometry(self, targets, *, coverage=None, method: str = "dia_forced_catalog", **kwargs):
+        from .sources.lsst import compute_release_photometry
+        return compute_release_photometry(
+            targets,
+            coverage=coverage,
+            method=method,
+            data_release=self.collection.profile,
+            tap_service=self.collection.tap_service,
+            butler=self.collection.butler,
+            **kwargs,
+        )
+
 
 class DataSourceRegistry:
     def __init__(self) -> None:
@@ -130,7 +145,7 @@ class DataSourceRegistry:
 
 def default_data_sources() -> DataSourceRegistry:
     registry = DataSourceRegistry()
-    registry.register(ProviderHandle("hsh", "survey", ("targets", "epochs"), lambda **kwargs: __import__("target_selection.target_io", fromlist=["load"]).load("hsh_events", filters=kwargs.get("filters"))))
+    registry.register(ProviderHandle("hsh", "survey", ("targets",), lambda **kwargs: __import__("target_selection.target_io", fromlist=["load"]).load("hsh_events", filters=kwargs.get("filters"))))
     registry.register(MOPHandle())
     registry.register(RubinHandle())
     return registry
