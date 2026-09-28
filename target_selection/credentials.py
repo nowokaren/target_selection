@@ -18,6 +18,7 @@ from typing import Literal
 
 Backend = Literal["auto", "keyring", "env", "netrc", "prompt"]
 KEYRING_SERVICE = "target-selection"
+NETRC_HOSTS = {"opm": "lensingtom.zah.uni-heidelberg.de"}
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,10 @@ class Credentials:
 def _env_names(provider: str) -> tuple[str, str]:
     prefix = "TARGET_SELECTION_" + str(provider).upper()
     return f"{prefix}_USERNAME", f"{prefix}_PASSWORD"
+
+
+def _netrc_machine(provider: str) -> str:
+    return NETRC_HOSTS.get(str(provider).strip().lower(), str(provider).strip().lower())
 
 
 def _keyring_module():
@@ -64,7 +69,7 @@ def _get_netrc(provider: str, path: str | Path | None = None) -> Credentials | N
     if not netrc_path.exists():
         return None
     try:
-        authenticators = netrc_module.netrc(str(netrc_path)).authenticators(provider)
+        authenticators = netrc_module.netrc(str(netrc_path)).authenticators(_netrc_machine(provider))
     except (OSError, netrc_module.NetrcParseError):
         return None
     if not authenticators:
@@ -118,7 +123,7 @@ def set_credentials(provider: str, username: str, password: str, *, backend: Lit
         return
     path = Path(netrc_path).expanduser() if netrc_path else Path.home() / ".netrc"
     with path.open("a", encoding="utf-8") as handle:
-        handle.write(f"\nmachine {provider}\nlogin {username}\npassword {password}\n")
+        handle.write(f"\nmachine {_netrc_machine(provider)}\nlogin {username}\npassword {password}\n")
     os.chmod(path, 0o600)
 
 
