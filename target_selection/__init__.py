@@ -1,7 +1,18 @@
 """Extensible target-selection and follow-up planning toolkit."""
 
 from .config import AnalysisConfig, load_config
-from . import report, target_io, visibility
+from . import contracts, data_source, report, target_io, visibility
+from .contracts import (
+    ContractError,
+    normalize_observations,
+    normalize_targets,
+    validate_contract,
+    validate_coverage,
+    validate_observations,
+    validate_targets,
+    validate_visibility,
+)
+from .data_source import DataSourceRegistry, ProviderHandle, data_source
 from .target_io import describe_adapter, describe_source, list_adapters, list_sources
 from .products import plot_sky_dual_metric
 from .reporting import numeric_series, plot_collection_distributions, write_collection_summaries
@@ -110,5 +121,16 @@ __all__ = [
     "target_io",
     "report",
     "visibility",
+    "contracts",
+    "data_source",
+    "ContractError",
+    "normalize_targets",
+    "normalize_observations",
+    "validate_targets",
+    "validate_observations",
+    "validate_visibility",
+    "validate_coverage",
+    "validate_contract",
+    "DataSourceRegistry",
+    "ProviderHandle",
 ]
-

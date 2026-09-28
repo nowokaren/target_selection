@@ -15,7 +15,7 @@ def create_client():
 
 def load_event_data(
     targets: pd.DataFrame,
-    fields: tuple[str, ...] = ("magnitude", "event_duration_days", "event_peak_hjd", "u0"),
+    fields: tuple[str, ...] | None = None,
     *,
     client=None,
     cache_dir: str | Path | None = None,
@@ -32,6 +32,7 @@ def load_event_data(
     """
     if "target_id" not in targets:
         raise ValueError("MOP event enrichment requires a target_id column.")
+    requested = tuple(fields or ("magnitude_last", "tE_days", "t0_hjd", "u0"))
     if client is None:
         client = create_client()
     work = targets[["target_id"]].drop_duplicates().copy()
@@ -41,17 +42,23 @@ def load_event_data(
         max_workers=max_workers, cache_dir=cache_dir,
         photometry_dir=photometry_dir, refresh=refresh,
     )
+    result = enriched[["target_id"]].copy()
     aliases = {
-        "magnitude": ("mop_mag_now", "mag_now"),
-        "event_duration_days": ("mop_te_days", "mop_t_e_days", "tE_days"),
-        "event_peak_hjd": ("mop_t0_hjd", "mop_t_0_hjd", "t0_HJD"),
+        "magnitude_last": ("mop_mag_now", "mop_mag_last", "mag_now", "mag_last", "magnitude_last"),
+        "tE_days": ("mop_te_days", "mop_t_e_days", "tE_days", "event_duration_days"),
+        "t0_hjd": ("mop_t0_hjd", "mop_t_0_hjd", "t0_HJD", "event_peak_hjd"),
         "u0": ("mop_u0", "u0"),
     }
-    result = enriched[["target_id"]].copy()
-    for field in fields:
-        candidates = aliases.get(field, (f"mop_{field}", field))
+    legacy_aliases = {
+        "magnitude": "magnitude_last",
+        "event_duration_days": "tE_days",
+        "event_peak_hjd": "t0_hjd",
+    }
+    for field in requested:
+        canonical = legacy_aliases.get(field, field)
+        candidates = aliases.get(canonical, (f"mop_{canonical}", canonical))
         source = next((column for column in candidates if column in enriched), None)
-        result[field] = enriched[source] if source is not None else pd.NA
+        result[canonical] = enriched[source] if source is not None else pd.NA
     if "mop_parameters_status" in enriched:
         result["mop_parameters_status"] = enriched["mop_parameters_status"]
     return result
@@ -110,4 +117,3 @@ def apply_authoritative_coordinates(targets: pd.DataFrame) -> pd.DataFrame:
     data.loc[selection_only, "coordinate_source"] = "MOP visibility table"
     data.loc[selection_only, "coordinate_priority"] = 90
     return data
-

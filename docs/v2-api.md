@@ -9,6 +9,21 @@ guide](contracts/README.md). This page describes the current transitional API;
 some examples still expose compatibility names while provider adapters are
 being migrated to the v0.1 contracts.
 
+The common provider registry is available as:
+
+```python
+from target_selection import data_source
+
+data_source.mop.features
+data_source.hsh.supports("epochs")
+data_source.lsst(collection="DP2").features
+```
+
+`category` is the single target-level classification field. Provider columns
+such as `status` or `grade` may be preserved, but adapters normalize one of
+them to `category` when no category is already present. `is_usable` belongs to
+an observation and is a quality flag, not a target category.
+
 ## Load targets
 
 ```python

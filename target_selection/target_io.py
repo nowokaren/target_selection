@@ -13,6 +13,7 @@ import copy
 
 import pandas as pd
 
+from .contracts import normalize_targets, validate_targets
 from .sources.catalog_adapters import CatalogAdapterRegistry, default_catalog_registry
 
 _REGISTRY = default_catalog_registry()
@@ -105,8 +106,11 @@ def load(
     adapter_name = str(definition.get("adapter", "csv"))
     if "data" in definition:
         from .sources.catalog_adapters import CsvCatalogAdapter
-        return CsvCatalogAdapter()._normalize(definition["data"], definition, filters=filters, verbose=verbose)
-    return _REGISTRY.create(adapter_name).load(definition, filters=filters, verbose=verbose)
+        result = CsvCatalogAdapter()._normalize(definition["data"], definition, filters=filters, verbose=verbose)
+    else:
+        result = _REGISTRY.create(adapter_name).load(definition, filters=filters, verbose=verbose)
+    result = normalize_targets(result, provider=str(definition.get("name", source_name or "catalog")))
+    return validate_targets(result)
 
 
 def add_data(
@@ -126,7 +130,12 @@ def add_data(
     their adapters are registered.
     """
     result = catalog.copy()
-    requested = tuple(fields or ())
+    field_aliases = {
+        "magnitude": "magnitude_last",
+        "event_duration_days": "tE_days",
+        "event_peak_hjd": "t0_hjd",
+    }
+    requested = tuple(field_aliases.get(str(field), str(field)) for field in (fields or ()))
     if loader is not None:
         data = loader(result.copy(), requested)
     elif data is None and str(provider).strip().lower() == "mop":

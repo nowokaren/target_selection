@@ -15,7 +15,7 @@ import pandas as pd
 
 from target_selection.config import AnalysisConfig, SourceSpec
 
-SourceKind = Literal["survey", "event_aggregator", "user_target_list", "local_inventory", "catalog"]
+SourceKind = Literal["survey", "tom", "event_aggregator", "user_target_list", "local_inventory", "catalog"]
 AccessMode = Literal["python_api", "http_api", "tap_butler", "local_csv", "local_files", "database"]
 Capability = Literal[
     "targets",

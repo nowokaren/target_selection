@@ -5,8 +5,7 @@ row per target, provider and observation epoch. It combines epochs with any
 photometric information available for those epochs.
 
 The table is intentionally in a row-oriented format: a provider can add a new
-epoch or band without adding new columns. The filename does not need a
-`_long` suffix.
+epoch or band without adding new columns.
 
 ## Required columns
 
@@ -40,7 +39,10 @@ Magnitude and flux may coexist when a provider supplies both. A conversion
 must not silently overwrite the original measurement.
 
 `is_usable` means that the provider's documented quality criteria passed. It
-does not guarantee that the target is detected in the image.
+does not guarantee that the target is detected in the image. It is not the
+same field as the target-level `category` (which may originate from a TOM
+status, a survey grade or another classification). A provider may calculate
+`is_usable` from its own quality flags; it is not restricted to TOMs.
 
 ## Missing values and duplicates
 
@@ -48,4 +50,3 @@ Missing photometry is represented by null values. An epoch-only observation is
 valid and may have all measurement columns null. Duplicate rows are allowed
 only when they have different `observation_id` values or represent distinct
 measurements; adapters must document how provider duplicates are removed.
-
