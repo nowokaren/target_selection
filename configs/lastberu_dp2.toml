@@ -8,8 +8,8 @@ name = "lastberu_dp2"
 
 # Input and output locations. The 35k-row catalog is intentionally kept out of
 # Git; change input_path when the local file is stored elsewhere.
-input_path = "LaStBeRu_data/LaStBeRu_watchlist_LSST_grades.csv"
-output_dir = "outputs/catalog_enrichment"
+input_path = "data/LaStBeRu_data/LaStBeRu_watchlist_LSST_grades.csv"
+output_dir = "outputs"
 cache_dir = "outputs/_cache/reference_catalog"
 
 # Rubin Data Preview/Data Release profile and input-column mapping.

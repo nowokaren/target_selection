@@ -19,8 +19,17 @@ nav:
   - Data and cache: data-and-cache.md
   - Products: products.md
   - Product examples: examples.md
+  - Version 2 architecture: v2-architecture.md
+  - Version 2 API: v2-api.md
+  - Version 2 reading guide: v2-reading-guide.md
+  - Version 2 tools inventory: v2-tools.md
+  - Version 2 seasonal workflow: v2-seasonal-workflow.md
+  - Version 2 usage notebooks: usage-notebooks.md
   - Large reference catalogs: reference-catalog.md
   - Python and CLI API: api.md
+  - Terminal visibility reports: visibility-cli.md
+  - Catalog sources and adapters: source-adapters.md
+  - Rubin RSP access API: rsp-access.md
   - Extending the tool:
       - Architecture: architecture.md
       - Architecture proposal: architecture_restructure_proposal.md

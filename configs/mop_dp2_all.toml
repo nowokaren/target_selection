@@ -1,0 +1,17 @@
+# Configuration for the first MOP -> DP2 experiment.
+# The notebook starts with a small preview and can then be run for all targets.
+
+[experiment]
+name = "mop_dp2_all"
+max_workers = 2
+refresh = false
+
+# Set this to an integer for a trial run and to "all" for the complete snapshot.
+target_limit = 200
+
+[paths]
+output_dir = "outputs/mop_dp2_all"
+raw_dir = "outputs/mop_dp2_all/raw"
+cache_dir = "outputs/mop_dp2_all/cache"
+tables_dir = "outputs/mop_dp2_all/tables"
+

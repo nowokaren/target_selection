@@ -34,6 +34,10 @@ def canonical_target_name(value: object) -> str:
 
 def _numeric_parameter(values: pd.Series) -> pd.Series:
     """Extract the nominal numerical value from MOP ``value∓uncertainty`` fields."""
+    # Duplicate column names can make pandas return a DataFrame instead of a
+    # Series after source tables are merged. Keep the first canonical value.
+    if isinstance(values, pd.DataFrame):
+        values = values.iloc[:, 0]
     return pd.to_numeric(
         values.astype(str).str.extract(r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)", expand=False),
         errors="coerce",

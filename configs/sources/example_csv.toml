@@ -1,0 +1,10 @@
+[source]
+name = "example_csv"
+adapter = "csv"
+path = "data/example.csv"
+capabilities = ["targets", "coordinates"]
+
+[columns]
+id = "target_id"
+ra = "ra_deg"
+dec = "dec_deg"

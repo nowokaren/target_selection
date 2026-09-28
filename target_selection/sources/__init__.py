@@ -12,6 +12,7 @@ from .base import (
     TargetProviderAdapter,
 )
 from .registry import AdapterRegistry, default_adapter_registry
+from .catalog_adapters import CatalogAdapterRegistry, CsvCatalogAdapter, default_catalog_registry
 
 __all__ = [
     "SourceKind",
@@ -25,4 +26,7 @@ __all__ = [
     "SourceContext",
     "TargetProviderAdapter",
     "default_adapter_registry",
+    "CatalogAdapterRegistry",
+    "CsvCatalogAdapter",
+    "default_catalog_registry",
 ]

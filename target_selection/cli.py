@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from target_selection.config import load_config
@@ -29,11 +30,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     catalog.add_argument("--config", required=True)
     commands.add_parser("list-sources", help="List installed source adapters")
+    commands.add_parser("visibility", help="Interactively select targets and make visibility PDF")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv and raw_argv[0] == "visibility":
+        from .visibility_cli import main as visibility_main
+        return visibility_main(raw_argv[1:])
+    args = build_parser().parse_args(raw_argv)
     if args.command == "list-sources":
         print(json.dumps(default_adapter_registry().available(), indent=2))
         return 0

@@ -63,7 +63,7 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
     dia_rows = release_photometry
     if "measurement_method" in dia_rows:
         dia_rows = dia_rows.loc[
-            dia_rows["measurement_method"].astype(str).eq("dia_forced_catalog")
+            dia_rows["measurement_method"].astype(str).isin(["dia_forced_catalog", "dia_source_catalog"])
         ]
     dia_match = False
     dia_status = "not evaluated (coadd forced mode)"
@@ -202,29 +202,29 @@ def plot_target(target, *, butler, tap_service, data_release, calexps=None, phot
     has_release_data = False
     release_cmap = plt.get_cmap("tab10")
     for index, band in enumerate(release_bands):
-        data = prepare_release_lightcurve_data(release_photometry, band)
-        if data.empty:
-            continue
-        dates = mdates.date2num(data["Timestamp"].to_numpy(dtype="datetime64[us]"))
-        magnitudes = data["Magnitude"].to_numpy(dtype=float)
-        errors = data["Error"].to_numpy(dtype=float)
-        valid = np.isfinite(dates) & np.isfinite(magnitudes)
-        if not valid.any():
-            continue
-        errors = np.where(
-            np.isfinite(errors[valid]) & (errors[valid] >= 0), errors[valid], np.nan,
-        )
-        ax_lc.errorbar(
-            dates[valid], magnitudes[valid], yerr=errors, fmt="s", ms=3.2,
-            mfc=release_cmap(index % 10), mec="black", mew=.35,
-            color=release_cmap(index % 10), alpha=.95,
-            label=(
-                f"{data_release.name} {band} "
-                f"{'coadd forced' if (release_photometry.get('measurement_method', pd.Series(dtype=str)).astype(str) == 'coadd_forced').any() else 'release photometry'} "
-                f"(N={valid.sum()})"
-            ), zorder=3,
-        )
-        has_release_data = True
+        band_rows = release_photometry.loc[release_photometry["band"].astype(str).eq(str(band))].copy()
+        method_values = band_rows.get("measurement_method", pd.Series("release", index=band_rows.index)).astype(str)
+        for method_index, (method, method_rows) in enumerate(band_rows.assign(_method=method_values).groupby("_method", sort=False)):
+            data = prepare_release_lightcurve_data(method_rows, band)
+            if data.empty:
+                continue
+            dates = mdates.date2num(data["Timestamp"].to_numpy(dtype="datetime64[us]"))
+            magnitudes = data["Magnitude"].to_numpy(dtype=float)
+            errors = data["Error"].to_numpy(dtype=float)
+            valid = np.isfinite(dates) & np.isfinite(magnitudes)
+            if not valid.any():
+                continue
+            errors = np.where(np.isfinite(errors[valid]) & (errors[valid] >= 0), errors[valid], np.nan)
+            method_key = str(method).lower()
+            method_label = {"dia_forced_catalog": "DIA forced", "dia_source_catalog": "DIA source", "coadd_forced": "coadd forced", "calexp_forced": "calexp forced"}.get(method_key, method)
+            marker = "s" if method_key == "dia_forced_catalog" else ("D" if method_key == "dia_source_catalog" else "o")
+            ax_lc.errorbar(
+                dates[valid], magnitudes[valid], yerr=errors, fmt=marker, ms=3.2,
+                mfc=release_cmap((index + method_index) % 10), mec="black", mew=.35,
+                color=release_cmap((index + method_index) % 10), alpha=.95,
+                label=f"{data_release.name} {method_label} {band} (N={valid.sum()})", zorder=3,
+            )
+            has_release_data = True
 
     release_dates = np.array([])
     if calexps is not None and not calexps.empty and "expMidptMJD" in calexps:

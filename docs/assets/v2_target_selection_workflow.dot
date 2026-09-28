@@ -1,0 +1,80 @@
+digraph G {
+  graph [rankdir=TB, bgcolor="white", pad="0.25", nodesep="0.30", ranksep="0.52", fontname="Helvetica"];
+  edge [color="#566573", arrowsize=0.65, fontname="Helvetica", fontsize=8];
+
+  subgraph cluster_config {
+    label="1. Configure"; color="#5DADE2"; penwidth=2; style="rounded";
+
+  usecase [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#1B4F72"><TR><TD BGCOLOR="#D6EAF8"><B>Use case</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">season, survey, observatory</FONT></TD></TR></TABLE>>];
+  source [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#2874A6"><TR><TD BGCOLOR="#EAF2F8"><B>Source</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">catalog or API definitions</FONT></TD></TR></TABLE>>];
+  adapter [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#2874A6"><TR><TD BGCOLOR="#EAF2F8"><B>Adapter</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">access and normalization</FONT></TD></TR></TABLE>>];
+  capabilities [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#2874A6"><TR><TD BGCOLOR="#EAF2F8"><B>Capabilities</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">available data and operations</FONT></TD></TR></TABLE>>];
+  providers [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#2874A6"><TR><TD BGCOLOR="#EAF2F8"><B>Providers</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">optional data sources</FONT></TD></TR></TABLE>>];
+    usecase -> source [color="#2874A6", penwidth=1.4];
+    source -> adapter [color="#2874A6", penwidth=1.4];
+    adapter -> capabilities [color="#2874A6", penwidth=1.4];
+    capabilities -> providers [style=dashed, color="#7F8C8D"];
+  }
+  subgraph cluster_targets {
+    label="2. Load and select"; color="#58D68D"; penwidth=2; style="rounded";
+
+  load [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#148F77"><TR><TD BGCOLOR="#D5F5E3"><B>Load</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">target_io.load(...)</FONT></TD></TR></TABLE>>];
+  canonical [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#148F77"><TR><TD BGCOLOR="#D5F5E3"><B>Targets</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">canonical target table</FONT></TD></TR></TABLE>>];
+  filters [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#148F77"><TR><TD BGCOLOR="#D5F5E3"><B>Filter</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">category, magnitude, custom rules</FONT></TD></TR></TABLE>>];
+  missing [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#B7950B"><TR><TD BGCOLOR="#FCF3CF"><B>Missing data?</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">add_data or cache</FONT></TD></TR></TABLE>>];
+  enrich [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#B7950B"><TR><TD BGCOLOR="#FCF3CF"><B>Add data</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">selected provider</FONT></TD></TR></TABLE>>];
+  selected [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#148F77"><TR><TD BGCOLOR="#D5F5E3"><B>Selected</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">targets for analysis</FONT></TD></TR></TABLE>>];
+    load -> canonical [color="#148F77", penwidth=1.4];
+    canonical -> filters [color="#148F77", penwidth=1.4];
+    filters -> missing [color="#148F77", penwidth=1.4];
+    missing -> selected [label="no", color="#148F77", penwidth=1.2];
+    missing -> enrich [label="yes", color="#7F8C8D"];
+    enrich -> filters [label="repeat", color="#7F8C8D"];
+  }
+  subgraph cluster_analysis {
+    label="3. Choose analysis"; color="#AF7AC5"; penwidth=2; style="rounded";
+
+  scope [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#7D3C98"><TR><TD BGCOLOR="#E8DAEF"><B>Scope</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">required capabilities and outputs</FONT></TD></TR></TABLE>>];
+  collection [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#AF601A"><TR><TD BGCOLOR="#FDEBD0"><B>Collection</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">Rubin/RSP data release</FONT></TD></TR></TABLE>>];
+  coverage [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#AF601A"><TR><TD BGCOLOR="#FDEBD0"><B>Match</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">visits and coadds</FONT></TD></TR></TABLE>>];
+  maps [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#AF601A"><TR><TD BGCOLOR="#FDEBD0"><B>Properties</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">map values at targets</FONT></TD></TR></TABLE>>];
+  photometry [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#148F77"><TR><TD BGCOLOR="#E8F8F5"><B>Photometry</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">provider or cache</FONT></TD></TR></TABLE>>];
+    scope -> collection [label="Rubin", color="#7F8C8D"];
+    collection -> coverage [color="#AF601A", penwidth=1.2];
+    coverage -> maps [label="optional", style=dashed, color="#7F8C8D"];
+    scope -> photometry [label="light curves", color="#7F8C8D"];
+  }
+  subgraph cluster_products {
+    label="4. Products"; color="#F5CBA7"; penwidth=2; style="rounded";
+
+  visibility_product [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#B7950B"><TR><TD BGCOLOR="#FCF3CF"><B>Visibility</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">night/time plot</FONT></TD></TR></TABLE>>];
+  coverage_product [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#2874A6"><TR><TD BGCOLOR="#EAF2F8"><B>Coverage</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">visits/coadds table</FONT></TD></TR></TABLE>>];
+  skymap [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#2874A6"><TR><TD BGCOLOR="#EAF2F8"><B>Sky map</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">target and coverage positions</FONT></TD></TR></TABLE>>];
+  properties_product [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#2874A6"><TR><TD BGCOLOR="#EAF2F8"><B>Properties</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">depth, PSF, exposure, noise</FONT></TD></TR></TABLE>>];
+  cutouts [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#2874A6"><TR><TD BGCOLOR="#EAF2F8"><B>Cutouts</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">FITS and PNG images</FONT></TD></TR></TABLE>>];
+  lightcurves [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#148F77"><TR><TD BGCOLOR="#E8F8F5"><B>Light curves</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">photometry over time</FONT></TD></TR></TABLE>>];
+  summary [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#148F77"><TR><TD BGCOLOR="#E8F8F5"><B>Summary</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">tables by category and band</FONT></TD></TR></TABLE>>];
+  pdf [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#148F77"><TR><TD BGCOLOR="#E8F8F5"><B>PDF</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">combined report</FONT></TD></TR></TABLE>>];
+  export [shape=plain, label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5" COLOR="#1B4F72"><TR><TD BGCOLOR="#D6EAF8"><B>Export</B></TD></TR><TR><TD BGCOLOR="white"><FONT POINT-SIZE="8">lists, products, provenance</FONT></TD></TR></TABLE>>];
+    visibility_product -> pdf [color="#7F8C8D"];
+    coverage_product -> pdf [color="#7F8C8D"];
+    skymap -> pdf [color="#7F8C8D"];
+    properties_product -> pdf [color="#7F8C8D"];
+    cutouts -> pdf [color="#7F8C8D"];
+    lightcurves -> pdf [color="#7F8C8D"];
+    summary -> pdf [color="#7F8C8D"];
+    pdf -> export [color="#1B4F72", penwidth=1.4];
+  }
+
+  providers -> load [style=dashed, color="#7F8C8D", label="default or chosen"];
+  selected -> scope [color="#7D3C98", penwidth=1.4];
+  selected -> visibility_product [label="visibility", color="#B7950B", penwidth=1.1];
+  coverage -> coverage_product [color="#2874A6", penwidth=1.1];
+  coverage -> skymap [color="#7F8C8D"];
+  coverage -> cutouts [label="images", color="#7F8C8D"];
+  maps -> properties_product [color="#7F8C8D"];
+  photometry -> lightcurves [color="#148F77", penwidth=1.1];
+  coverage -> summary [color="#7F8C8D"];
+  scope -> visibility_product [label="if requested", style=dashed, color="#7F8C8D"];
+  scope -> summary [label="if requested", style=dashed, color="#7F8C8D"];
+}

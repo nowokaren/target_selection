@@ -64,13 +64,51 @@ def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value)).strip("_") or "catalog"
 
 
+def make_science_rgb(
+    cutouts: Mapping[str, np.ndarray],
+    *,
+    q: float = 8.0,
+    stretch_fraction: float = 0.2,
+) -> np.ndarray | None:
+    """Build a Lupton RGB image without per-band normalisation or background subtraction.
+
+    The preferred mapping is R=i, G=r, B=g. Fallback mappings use three
+    distinct available bands and are tried in a fixed, science-motivated order.
+    A common scale is used only to choose the display ``stretch``; flux ratios
+    between bands are otherwise preserved.
+    """
+    from astropy.visualization import make_lupton_rgb
+
+    if len(cutouts) < 3:
+        return None
+    candidates = (
+        ("i", "r", "g"), ("i", "r", "u"), ("r", "g", "u"),
+        ("i", "g", "u"), ("i", "r", "z"), ("z", "r", "g"),
+        ("z", "r", "u"), ("z", "g", "u"), ("y", "r", "g"),
+        ("r", "g", "z"), ("i", "u", "z"), ("r", "u", "z"),
+        ("g", "u", "z"), ("y", "u", "g"),
+    )
+    selected = next((triple for triple in candidates if all(b in cutouts for b in triple)), None)
+    if selected is None:
+        return None
+    channels = [np.asarray(cutouts[b], dtype=float) for b in selected]
+    shape = tuple(min(image.shape[index] for image in channels) for index in (0, 1))
+    channels = [np.nan_to_num(image[: shape[0], : shape[1]], nan=0.0, posinf=0.0, neginf=0.0) for image in channels]
+    positive = np.concatenate([image[image > 0].ravel() for image in channels])
+    if positive.size == 0:
+        return None
+    stretch = max(float(np.nanpercentile(positive, 99.5)) * stretch_fraction, 1e-12)
+    rgb = make_lupton_rgb(*channels, minimum=0, Q=q, stretch=stretch)
+    return rgb[0] if isinstance(rgb, tuple) else rgb
+
+
 @dataclass(frozen=True)
 class ReferenceCatalogConfig:
     """Configuration for enriching a large coordinate catalog."""
 
     input_path: str
     name: str = "reference_catalog"
-    output_dir: str = "outputs/catalog_enrichment"
+    output_dir: str = "outputs"
     cache_dir: str = "outputs/_cache/reference_catalog"
     data_release: str = "DP2"
     target_id_column: str = "object_id"
@@ -501,9 +539,14 @@ def query_visit_summary_by_band(
                     pass
             results = [future.result() for future in iterator]
     matches = [result[0] for result in results if not result[0].empty]
-    summary = _aggregate_detector_matches(
-        pd.concat(matches, ignore_index=True, sort=False) if matches else pd.DataFrame()
+    raw_matches = (
+        pd.concat(matches, ignore_index=True, sort=False)
+        if matches else pd.DataFrame()
     )
+    summary = _aggregate_detector_matches(raw_matches)
+    # Keep the target-detector rows available to callers that need a detailed
+    # audit table, without changing the existing summary return value.
+    summary.attrs["detector_matches"] = raw_matches
     statuses = (
         pd.concat([result[1] for result in results], ignore_index=True)
         if results
@@ -859,16 +902,51 @@ def save_coadd_cutout_grid(
     size_arcsec: float = 20.0,
     save_fits: bool = False,
     fits_output_dir: str | Path | None = None,
+    add_rgb: bool = False,
+    fits_name_prefix: str = "",
+    diagnostics: list[dict[str, Any]] | None = None,
 ) -> tuple[Path | None, int]:
-    """Save a multi-band square cutout grid for one target."""
+    """Save coadd cutouts and optionally record detailed per-band diagnostics.
+
+    ``diagnostics`` receives one record per requested band.  Records include
+    the dataset query, Butler reference, pixel coordinates and complete
+    traceback text for query, Butler, WCS, rendering and file-writing errors.
+    The two-value return signature is kept for compatibility with callers.
+    """
+    import json
+    import traceback
     import astropy.units as u
     import matplotlib.pyplot as plt
     from astropy.coordinates import SkyCoord
     from astropy.visualization import AsinhStretch, ImageNormalize
 
     release = get_data_release(data_release)
+    target_id = str(row.get("target_id", ""))
     coordinate = SkyCoord(float(row["ra_deg"]) * u.deg, float(row["dec_deg"]) * u.deg)
+    requested_bands = [str(band) for band in bands]
     refs: list[Any] = []
+    query_attempts: list[dict[str, Any]] = []
+
+    def ref_info(ref: Any) -> str:
+        try:
+            data_id = getattr(ref, "dataId", None)
+            return str(data_id if data_id is not None else ref)
+        except Exception:
+            return repr(ref)
+
+    def emit(band: str, status: str, **details: Any) -> None:
+        record = {
+            "target_id": target_id,
+            "band": str(band),
+            "status": status,
+            "ra_deg": float(row["ra_deg"]),
+            "dec_deg": float(row["dec_deg"]),
+            "requested_bands": ",".join(requested_bands),
+            **details,
+        }
+        if diagnostics is not None:
+            diagnostics.append(record)
+
     for dataset_type in release.coadd_dataset_types:
         try:
             refs = list(
@@ -878,124 +956,158 @@ def save_coadd_cutout_grid(
                     bind={"ra": float(row["ra_deg"]), "dec": float(row["dec_deg"])},
                 )
             )
-        except Exception:
+            query_attempts.append({"dataset_type": str(dataset_type), "status": "ok", "n_refs": len(refs)})
+        except Exception as error:
+            query_attempts.append({
+                "dataset_type": str(dataset_type),
+                "status": "error",
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+                "traceback": traceback.format_exc(),
+            })
             refs = []
         if refs:
             break
-    by_band: dict[str, list[Any]] = {str(band): [] for band in bands}
+
+    by_band: dict[str, list[Any]] = {str(band): [] for band in requested_bands}
     for ref in refs:
         band = str(_data_id_value(ref, "band", ""))
         if band in by_band:
             by_band[band].append(ref)
 
-    # Rubin has at most six standard bands; keep them in one compact row so
-    # the target can be inspected at a glance. The fallback still supports a
-    # longer custom band list by wrapping after six panels.
-    n_columns = min(6, max(1, len(bands)))
-    n_rows = math.ceil(len(bands) / n_columns)
-    figure, axes = plt.subplots(
-        n_rows, n_columns,
-        figsize=(2.45 * n_columns, 2.55 * n_rows),
-        squeeze=False,
-    )
+    query_json = json.dumps(query_attempts, default=str, ensure_ascii=False)
+    for band in requested_bands:
+        if not by_band[band]:
+            emit(
+                band,
+                "no_reference",
+                dataset_types=",".join(str(value) for value in release.coadd_dataset_types),
+                n_refs=0,
+                query_attempts=query_json,
+                error_type="no_reference_for_band",
+                error_message="The coverage table registered this band, but the Butler spatial query returned no reference for it.",
+                traceback="",
+            )
+
+    n_columns = min(7, max(1, len(requested_bands) + int(add_rgb)))
+    n_rows = math.ceil((len(requested_bands) + int(add_rgb)) / n_columns)
+    figure, axes = plt.subplots(n_rows, n_columns, figsize=(2.45 * n_columns, 2.55 * n_rows), squeeze=False)
     plotted = 0
-    for axis, band in zip(axes.flat, bands, strict=False):
+    for axis, band in zip(axes.flat, requested_bands, strict=False):
+        if not by_band[band]:
+            axis.axis("off")
+            axis.text(0.5, 0.5, f"No {band}-band coadd reference", ha="center", va="center", transform=axis.transAxes)
+            continue
         selected = None
-        for ref in by_band[str(band)]:
-            coadd = butler.get(ref)
-            x, y = coadd.fits_wcs.world_to_pixel(coordinate)
-            ny, nx = coadd.image.array.shape
-            if 0 <= x < nx and 0 <= y < ny:
-                selected = (coadd, float(x), float(y))
-                break
-        if selected is None:
-            axis.axis("off")
-            axis.text(0.5, 0.5, f"No {band}-band coadd", ha="center", va="center", transform=axis.transAxes)
-            continue
-        coadd, x, y = selected
-        pixel_scale = float(np.mean([scale.to_value(u.arcsec) for scale in coadd.fits_wcs.proj_plane_pixel_scales()]))
-        half_pixels = max(2, int(math.ceil(size_arcsec / (2 * pixel_scale))))
-        x0, x1 = max(0, int(math.floor(x)) - half_pixels), min(nx, int(math.floor(x)) + half_pixels + 1)
-        y0, y1 = max(0, int(math.floor(y)) - half_pixels), min(ny, int(math.floor(y)) + half_pixels + 1)
-        cutout = np.asarray(coadd.image.array[y0:y1, x0:x1], dtype=float)
-        finite = cutout[np.isfinite(cutout)]
-        if not len(finite):
-            axis.axis("off")
-            axis.text(0.5, 0.5, f"Empty {band}-band coadd", ha="center", va="center", transform=axis.transAxes)
-            continue
-        extent = (
-            (x0 - x) * pixel_scale,
-            (x1 - x) * pixel_scale,
-            (y0 - y) * pixel_scale,
-            (y1 - y) * pixel_scale,
-        )
-        norm = ImageNormalize(
-            vmin=np.nanpercentile(finite, 5),
-            vmax=np.nanpercentile(finite, 99.8),
-            stretch=AsinhStretch(0.08),
-            clip=True,
-        )
-        axis.imshow(cutout, origin="lower", cmap="gray", norm=norm, extent=extent)
-        if save_fits:
-            from astropy.io import fits
-
-            fits_dir = Path(fits_output_dir) if fits_output_dir is not None else Path(output_path).parent
-            fits_dir.mkdir(parents=True, exist_ok=True)
-            fits_path = fits_dir / f"{_safe_name(row['target_id'])}_{band}.fits"
-            hdu = fits.PrimaryHDU(data=np.asarray(cutout, dtype=np.float32))
-            hdu.header["TARGET"] = str(row["target_id"])
-            hdu.header["BAND"] = str(band)
-            hdu.header["RA_DEG"] = float(row["ra_deg"])
-            hdu.header["DEC_DEG"] = float(row["dec_deg"])
-            hdu.header["SIZE_ARC"] = float(size_arcsec)
-            hdu.header["PIXSCALE"] = float(pixel_scale)
+        attempts: list[dict[str, Any]] = []
+        for ref in by_band[band]:
+            info = {"reference": ref_info(ref)}
             try:
-                wcs_header = coadd.fits_wcs.to_header()
-                # Shift the parent coadd reference pixel into the cutout frame.
-                if "CRPIX1" in wcs_header:
-                    wcs_header["CRPIX1"] -= float(x0)
-                if "CRPIX2" in wcs_header:
-                    wcs_header["CRPIX2"] -= float(y0)
-                hdu.header.extend(wcs_header, update=True)
-            except Exception:
-                pass
-            hdu.writeto(fits_path, overwrite=True)
-        axis.add_patch(plt.Circle((0, 0), 0.8, edgecolor="red", facecolor="none", lw=1.2))
-        subtitle = []
-        for column, label, fmt in (
-            (f"n_images_{band}", "N", ".0f"),
-            (f"coadd_maglim_{band}", "depth", ".2f"),
-            (f"coadd_psf_fwhm_arcsec_{band}", "FWHM", ".2f"),
-        ):
-            value = pd.to_numeric(pd.Series([row.get(column)]), errors="coerce").iloc[0]
-            if pd.notna(value):
-                subtitle.append(f"{label}={value:{fmt}}")
-        axis.set_title(f"{band}  " + "  ".join(subtitle), fontsize=8)
-        axis.set_xlabel("x offset [arcsec]", fontsize=7)
-        axis.set_ylabel("y offset [arcsec]", fontsize=7)
-        axis.tick_params(labelsize=7)
-        plotted += 1
-    for axis in axes.flat[len(bands) :]:
-        axis.axis("off")
-    grade = row.get("selection_grade", "—")
-    n_images = pd.to_numeric(pd.Series([row.get("n_images_total")]), errors="coerce").iloc[0]
-    n_bands = pd.to_numeric(pd.Series([row.get("coadd_n_bands")]), errors="coerce").iloc[0]
-    details = [f"{row['target_id']}", f"grade {grade}"]
-    if pd.notna(n_images):
-        details.append(f"N images {int(n_images)}")
-    if pd.notna(n_bands):
-        details.append(f"coadd bands {int(n_bands)}")
-    figure.suptitle(" — ".join(details), fontsize=10, y=0.985)
-    figure.subplots_adjust(left=0.025, right=0.995, bottom=0.13, top=0.84, wspace=0.08, hspace=0.05)
-    if plotted == 0:
+                coadd = butler.get(ref)
+            except Exception as error:
+                info.update({"status": "butler_error", "error_type": type(error).__name__, "error_message": str(error), "traceback": traceback.format_exc()})
+                attempts.append(info)
+                continue
+            try:
+                x, y = coadd.fits_wcs.world_to_pixel(coordinate)
+                image_array = coadd.image.array
+                ny, nx = image_array.shape
+                info.update({"x": float(x), "y": float(y), "nx": int(nx), "ny": int(ny)})
+            except Exception as error:
+                info.update({"status": "wcs_or_image_error", "error_type": type(error).__name__, "error_message": str(error), "traceback": traceback.format_exc()})
+                attempts.append(info)
+                continue
+            if not (0 <= x < nx and 0 <= y < ny):
+                info["status"] = "outside_image"
+                info["error_message"] = "Target coordinate is outside the returned coadd image footprint."
+                attempts.append(info)
+                continue
+            try:
+                pixel_scale_check = float(np.mean([scale.to_value(u.arcsec) for scale in coadd.fits_wcs.proj_plane_pixel_scales()]))
+                half_pixels_check = max(2, int(math.ceil(size_arcsec / (2 * pixel_scale_check))))
+                x0_check, x1_check = max(0, int(math.floor(x)) - half_pixels_check), min(nx, int(math.floor(x)) + half_pixels_check + 1)
+                y0_check, y1_check = max(0, int(math.floor(y)) - half_pixels_check), min(ny, int(math.floor(y)) + half_pixels_check + 1)
+                candidate_array = coadd.image.array
+                if hasattr(candidate_array, "filled"):
+                    candidate_array = candidate_array.filled(np.nan)
+                candidate_cutout = np.asarray(candidate_array[y0_check:y1_check, x0_check:x1_check], dtype=float)
+                finite_check = candidate_cutout[np.isfinite(candidate_cutout)]
+                if not len(finite_check):
+                    info.update({"status": "empty_cutout", "x0": int(x0_check), "x1": int(x1_check), "y0": int(y0_check), "y1": int(y1_check), "cutout_shape": str(candidate_cutout.shape), "finite_pixels": 0, "error_type": "empty_cutout", "error_message": "The target is inside the coadd footprint, but the requested cutout contains no finite pixels."})
+                    attempts.append(info)
+                    continue
+            except Exception as error:
+                info.update({"status": "cutout_validation_error", "error_type": type(error).__name__, "error_message": str(error), "traceback": traceback.format_exc()})
+                attempts.append(info)
+                continue
+            selected = (coadd, float(x), float(y), int(nx), int(ny), info)
+            break
+        if selected is None:
+            statuses = [str(item.get("status", "unknown")) for item in attempts]
+            status = "butler_error" if attempts and all(value == "butler_error" for value in statuses) else "outside_image" if attempts and all(value == "outside_image" for value in statuses) else "empty_cutout" if attempts and all(value == "empty_cutout" for value in statuses) else "no_usable_reference"
+            emit(band, status, n_refs=len(by_band[band]), attempts=json.dumps(attempts, default=str, ensure_ascii=False), query_attempts=query_json, error_type=status, error_message="No usable coadd reference produced a cutout.", traceback="\n\n".join(str(item.get("traceback", "")) for item in attempts if item.get("traceback")))
+            axis.axis("off")
+            axis.text(0.5, 0.5, f"No usable {band}-band coadd", ha="center", va="center", transform=axis.transAxes)
+            continue
+        coadd, x, y, nx, ny, info = selected
+        try:
+            pixel_scale = float(np.mean([scale.to_value(u.arcsec) for scale in coadd.fits_wcs.proj_plane_pixel_scales()]))
+            half_pixels = max(2, int(math.ceil(size_arcsec / (2 * pixel_scale))))
+            x0, x1 = max(0, int(math.floor(x)) - half_pixels), min(nx, int(math.floor(x)) + half_pixels + 1)
+            y0, y1 = max(0, int(math.floor(y)) - half_pixels), min(ny, int(math.floor(y)) + half_pixels + 1)
+            image_array = coadd.image.array
+            if hasattr(image_array, "filled"):
+                image_array = image_array.filled(np.nan)
+            cutout = np.asarray(image_array[y0:y1, x0:x1], dtype=float)
+            finite = cutout[np.isfinite(cutout)]
+            if not len(finite):
+                raise ValueError("The cutout contains no finite pixels.")
+            extent = ((x0 - x) * pixel_scale, (x1 - x) * pixel_scale, (y0 - y) * pixel_scale, (y1 - y) * pixel_scale)
+            norm = ImageNormalize(vmin=np.nanpercentile(finite, 5), vmax=np.nanpercentile(finite, 99.8), stretch=AsinhStretch(0.08), clip=True)
+            axis.imshow(cutout, origin="lower", cmap="gray", norm=norm, extent=extent)
+            if save_fits:
+                from astropy.io import fits
+                fits_dir = Path(fits_output_dir) if fits_output_dir is not None else Path(output_path).parent
+                fits_dir.mkdir(parents=True, exist_ok=True)
+                prefix = _safe_name(fits_name_prefix) if str(fits_name_prefix).strip() else ""
+                target_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", target_id).strip("_") or "target"
+                filename = f"{prefix}_{target_name}_{band}.fits" if prefix else f"{target_name}_{band}.fits"
+                fits_path = fits_dir / filename
+                hdu = fits.PrimaryHDU(data=np.asarray(cutout, dtype=np.float32))
+                hdu.header["TARGET"] = target_id; hdu.header["BAND"] = str(band); hdu.header["RA_DEG"] = float(row["ra_deg"]); hdu.header["DEC_DEG"] = float(row["dec_deg"]); hdu.header["SIZE_ARC"] = float(size_arcsec); hdu.header["PIXSCALE"] = float(pixel_scale)
+                try:
+                    wcs_header = coadd.fits_wcs.to_header()
+                    if "CRPIX1" in wcs_header: wcs_header["CRPIX1"] -= float(x0)
+                    if "CRPIX2" in wcs_header: wcs_header["CRPIX2"] -= float(y0)
+                    hdu.header.extend(wcs_header, update=True)
+                except Exception:
+                    pass
+                hdu.writeto(fits_path, overwrite=True)
+            axis.add_patch(plt.Circle((0, 0), 0.8, edgecolor="red", facecolor="none", lw=1.2))
+            subtitle = []
+            for column, label, fmt in ((f"n_images_{band}", "N", ".0f"), (f"coadd_maglim_{band}", "depth", ".2f"), (f"coadd_psf_fwhm_arcsec_{band}", "FWHM", ".2f")):
+                value = pd.to_numeric(pd.Series([row.get(column)]), errors="coerce").iloc[0]
+                if pd.notna(value): subtitle.append(f"{label}={value:{fmt}}")
+            axis.set_title(f"{band}  " + "  ".join(subtitle), fontsize=8); axis.set_xlabel("x offset [arcsec]", fontsize=7); axis.set_ylabel("y offset [arcsec]", fontsize=7); axis.tick_params(labelsize=7)
+            plotted += 1
+            emit(band, "written", reference=info.get("reference", ""), x=x, y=y, nx=nx, ny=ny, cutout_shape=str(cutout.shape), finite_pixels=int(len(finite)), fits_path=str(fits_path) if save_fits else "", query_attempts=query_json, traceback="")
+        except Exception as error:
+            emit(band, "render_or_write_error", reference=info.get("reference", ""), x=x, y=y, nx=nx, ny=ny, query_attempts=query_json, error_type=type(error).__name__, error_message=str(error), traceback=traceback.format_exc())
+            axis.axis("off")
+            axis.text(0.5, 0.5, f"{band}: {type(error).__name__}", ha="center", va="center", transform=axis.transAxes)
+    if add_rgb:
+        axes.flat[len(requested_bands)].axis("off")
+    try:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        figure.savefig(output_path, dpi=170, bbox_inches="tight")
+        output = output_path
+    except Exception as error:
+        emit("__grid__", "png_write_error", output_path=str(output_path), error_type=type(error).__name__, error_message=str(error), traceback=traceback.format_exc())
+        output = None
+    finally:
         plt.close(figure)
-        return None, 0
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output_path, dpi=170, bbox_inches="tight")
-    plt.close(figure)
-    return output_path, plotted
-
+    return output, plotted
 
 def generate_prioritized_cutouts(
     catalog: pd.DataFrame,
@@ -1025,9 +1137,13 @@ def generate_prioritized_cutouts(
         filename = f"{int(row['cutout_priority_rank']):04d}_{_safe_name(row['target_id'])}_coadds.png"
         existing_path = Path(output_dir) / filename
         fits_dir = Path(fits_output_dir) if fits_output_dir is not None else Path(output_dir)
+        available_bands = {
+            band.strip() for band in str(row.get("coadd_bands", "")).split(",")
+            if band.strip()
+        }
         expected_fits = [
             fits_dir / f"{_safe_name(row['target_id'])}_{band}.fits"
-            for band in bands
+            for band in bands if str(band) in available_bands
         ]
         fits_ready = (not save_fits) or all(path.exists() for path in expected_fits)
         if reuse_existing and existing_path.exists() and fits_ready:
@@ -1192,6 +1308,8 @@ def generate_reference_catalog_cutouts(
     butler: Any = None,
     reuse_existing: bool | None = None,
     save_fits: bool | None = None,
+    fits_output_dir: str | Path | None = None,
+    cutout_output_dir: str | Path | None = None,
 ) -> pd.DataFrame:
     """Generate prioritized coadd cutouts from an enriched reference catalog."""
     if not isinstance(config, ReferenceCatalogConfig):
@@ -1207,9 +1325,9 @@ def generate_reference_catalog_cutouts(
         save_fits = config.save_cutout_fits
     result = generate_prioritized_cutouts(
         catalog, butler=butler, data_release=release,
-        output_dir=output_dir / "cutouts", bands=config.cutout_bands,
+        output_dir=(Path(cutout_output_dir) if cutout_output_dir is not None else output_dir / "cutouts"), bands=config.cutout_bands,
         size_arcsec=config.cutout_size_arcsec, reuse_existing=bool(reuse_existing),
-        save_fits=bool(save_fits), fits_output_dir=output_dir / "cutouts",
+        save_fits=bool(save_fits), fits_output_dir=(Path(fits_output_dir) if fits_output_dir is not None else output_dir / "cutouts"),
         verbose=config.verbose,
     )
     _catalog_without_cutout_columns(result).to_csv(output_dir / "reference_catalog.csv", index=False)

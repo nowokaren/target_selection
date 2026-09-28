@@ -17,6 +17,17 @@ def import_hsh_inventory(
     verbose: bool = True,
 ) -> int:
     """Import the HSH astrometric image inventory into the registry."""
+    inventory_path = Path(inventory_path)
+    if not inventory_path.exists() and not inventory_path.is_absolute():
+        # Notebooks are often launched from ``notebooks/`` rather than the
+        # repository root. Resolve the same user-facing relative path there.
+        candidates = [Path.cwd().parent / inventory_path, Path(__file__).resolve().parents[2] / inventory_path]
+        inventory_path = next((candidate for candidate in candidates if candidate.exists()), inventory_path)
+    if not inventory_path.exists():
+        raise FileNotFoundError(
+            f"HSH inventory not found: {inventory_path}. "
+            "Use an absolute path or run from the repository root."
+        )
     if verbose:
         print(f"[surveys] Importing HSH inventory: {inventory_path}", flush=True)
     database = TargetRegistry(database_path)

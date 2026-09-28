@@ -13,6 +13,50 @@ def create_client():
     return MOPClient()
 
 
+def load_event_data(
+    targets: pd.DataFrame,
+    fields: tuple[str, ...] = ("magnitude", "event_duration_days", "event_peak_hjd", "u0"),
+    *,
+    client=None,
+    cache_dir: str | Path | None = None,
+    photometry_dir: str | Path | None = None,
+    max_workers: int = 4,
+    refresh: bool = False,
+    errors: str = "ignore",
+) -> pd.DataFrame:
+    """Load canonical microlensing fields from MOP for existing targets.
+
+    This is an enrichment loader for :func:`target_selection.target_io.add_data`.
+    It preserves the input target population and returns one row per
+    ``target_id``. MOP-specific columns are mapped to stable v2 names.
+    """
+    if "target_id" not in targets:
+        raise ValueError("MOP event enrichment requires a target_id column.")
+    if client is None:
+        client = create_client()
+    work = targets[["target_id"]].drop_duplicates().copy()
+    work["Target"] = work["target_id"].astype(str)
+    enriched = client.enrich_microlensing_parameters(
+        work, target_column="Target", prefix="mop_", errors=errors,
+        max_workers=max_workers, cache_dir=cache_dir,
+        photometry_dir=photometry_dir, refresh=refresh,
+    )
+    aliases = {
+        "magnitude": ("mop_mag_now", "mag_now"),
+        "event_duration_days": ("mop_te_days", "mop_t_e_days", "tE_days"),
+        "event_peak_hjd": ("mop_t0_hjd", "mop_t_0_hjd", "t0_HJD"),
+        "u0": ("mop_u0", "u0"),
+    }
+    result = enriched[["target_id"]].copy()
+    for field in fields:
+        candidates = aliases.get(field, (f"mop_{field}", field))
+        source = next((column for column in candidates if column in enriched), None)
+        result[field] = enriched[source] if source is not None else pd.NA
+    if "mop_parameters_status" in enriched:
+        result["mop_parameters_status"] = enriched["mop_parameters_status"]
+    return result
+
+
 def apply_authoritative_coordinates(targets: pd.DataFrame) -> pd.DataFrame:
     """Use full-precision target-page coordinates whenever MOP supplied them."""
     data = targets.copy()

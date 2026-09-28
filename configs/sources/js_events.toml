@@ -1,0 +1,13 @@
+# Template for the JS event/observation catalog.
+# Supply data/js_data/observations.csv, or edit path when the inventory is available.
+[source]
+name = "js_events"
+adapter = "csv"
+path = "data/js_data/observations.csv"
+capabilities = ["targets", "coordinates", "observations", "photometry"]
+enabled = false
+
+[columns]
+id = "Target"
+ra = "RA_deg"
+dec = "Dec_deg"

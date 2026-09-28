@@ -17,12 +17,16 @@ def normalize_photometry_provenance(data: pd.DataFrame, *, provider: str = "MOP"
         return pd.DataFrame()
     result = data.copy()
     for column in ("Telescope", "Source", "Provider", "Collection"):
+        # CSV inference can create float columns when provenance is entirely
+        # missing. Cast explicitly before inserting string labels.
         if column not in result:
-            result[column] = ""
-    telescope = result["Telescope"].fillna("").astype(str).str.strip()
-    source = result["Source"].fillna("").astype(str).str.strip()
+            result[column] = pd.Series("", index=result.index, dtype="string")
+        else:
+            result[column] = result[column].astype("string")
+    telescope = result["Telescope"].fillna("").str.strip()
+    source = result["Source"].fillna("").str.strip()
     result.loc[telescope.eq(""), "Telescope"] = source.loc[telescope.eq("")]
-    result["Provider"] = result["Provider"].fillna("").astype(str).str.strip()
+    result["Provider"] = result["Provider"].fillna("").str.strip()
     result.loc[result["Provider"].eq(""), "Provider"] = str(provider)
     return result
 
@@ -66,6 +70,11 @@ def load_event_photometry(target, *, mop, cache_dir, refresh=False, legacy_cache
                 data.to_csv(path, index=False)
                 return data
             print(f"Photometry skipped for {target_name}: legacy file has no usable measurements")
+    if mop is None:
+        result = pd.DataFrame()
+        result.attrs["error"] = "No MOP client was provided and no cached photometry was available."
+        print(f"Photometry skipped for {target_name}: no MOP client or cached photometry")
+        return result
     try:
         data = normalize_photometry_provenance(mop.photometry(target_name), provider="MOP")
         if _valid_photometry(data):

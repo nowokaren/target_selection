@@ -1,0 +1,34 @@
+digraph G {
+  graph [rankdir=LR, bgcolor="white", pad="0.25", nodesep="0.35", ranksep="0.7", fontname="Helvetica"];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, margin="0.12,0.08"];
+  edge [color="#566573", arrowsize=0.7];
+  subgraph cluster_sources { label="Sources"; color="#AED6F1"; style="rounded";
+    csv [label="Local CSV/FITS/Parquet", fillcolor="#EAF2F8"];
+    mop [label="MOP API", fillcolor="#EAF2F8"];
+    hsh [label="HSH inventory/API", fillcolor="#EAF2F8"];
+    js [label="JS inventory/API", fillcolor="#EAF2F8"];
+    ogle [label="Future OGLE API", fillcolor="#EAF2F8"];
+    rsp [label="Rubin RSP collection", fillcolor="#EAF2F8"];
+  }
+  subgraph cluster_adapters { label="Adapters"; color="#A9DFBF"; style="rounded";
+    acsv [label="CsvCatalogAdapter", fillcolor="#E8F8F5"];
+    amop [label="MOP adapter", fillcolor="#E8F8F5"];
+    ahsh [label="HSH adapter", fillcolor="#E8F8F5"];
+    ajs [label="JS adapter", fillcolor="#E8F8F5"];
+    aogle [label="OGLE adapter", fillcolor="#E8F8F5"];
+    arsp [label="CollectionContext", fillcolor="#E8F8F5"];
+  }
+  subgraph cluster_capabilities { label="Capabilities"; color="#F5CBA7"; style="rounded";
+    targets [label="targets / coordinates", fillcolor="#FCF3CF"];
+    mag [label="magnitudes", fillcolor="#FCF3CF"];
+    visibility [label="visibility", fillcolor="#FCF3CF"];
+    phot [label="photometry", fillcolor="#FCF3CF"];
+    obs [label="observation history", fillcolor="#FCF3CF"];
+    images [label="images / coadds / cutouts", fillcolor="#FCF3CF"];
+  }
+  csv -> acsv; mop -> amop; hsh -> ahsh; js -> ajs; ogle -> aogle; rsp -> arsp;
+  acsv -> targets; acsv -> mag; amop -> targets; amop -> mag; amop -> phot;
+  ahsh -> obs; ajs -> obs; aogle -> targets; aogle -> phot;
+  arsp -> images; arsp -> phot;
+  visibility -> targets [style=dashed, label="local provider"];
+}

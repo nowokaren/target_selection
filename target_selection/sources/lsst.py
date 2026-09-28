@@ -17,7 +17,7 @@ import pandas as pd
 from data_release_config import DataReleaseConfig, get_data_release
 
 
-SUPPORTED_PHOTOMETRY_METHODS = {"coadd_forced", "dia_forced_catalog", "calexp_forced"}
+SUPPORTED_PHOTOMETRY_METHODS = {"coadd_forced", "dia_forced_catalog", "dia_source_catalog", "dia_combined_catalog", "calexp_forced"}
 
 
 def resolve_data_release(data_release: str | DataReleaseConfig = "DP2", *, photometry_method: str | None = None) -> DataReleaseConfig:
@@ -86,9 +86,20 @@ def query_visit_coverage(
             data["Target"] = name
         return data
 
+    coordinate_targets = targets[["Target", "RA_deg", "Dec_deg"]].copy()
+    coordinate_targets["RA_deg"] = pd.to_numeric(coordinate_targets["RA_deg"], errors="coerce")
+    coordinate_targets["Dec_deg"] = pd.to_numeric(coordinate_targets["Dec_deg"], errors="coerce")
+    invalid = coordinate_targets["RA_deg"].isna() | coordinate_targets["Dec_deg"].isna()
+    if invalid.any():
+        invalid_names = coordinate_targets.loc[invalid, "Target"].astype(str).tolist()
+        print(
+            f"[lsst] Skipping {len(invalid_names)} target(s) without valid coordinates "
+            f"for TAP coverage.", flush=True,
+        )
+    coordinate_targets = coordinate_targets.loc[~invalid]
     values = [
         (row.Target, float(row.RA_deg), float(row.Dec_deg))
-        for row in targets[["Target", "RA_deg", "Dec_deg"]].itertuples(index=False)
+        for row in coordinate_targets.itertuples(index=False)
     ]
     workers = max(1, min(int(max_workers), len(values))) if values else 1
     if workers == 1:
@@ -147,21 +158,31 @@ def compute_release_photometry(
         Visit/detector coverage table. Required for ``calexp_forced`` and useful
         for coadd epoch metadata in ``coadd_forced``.
     method:
-        ``dia_forced_catalog``, ``coadd_forced`` or ``calexp_forced``.
+        ``dia_forced_catalog``, ``dia_source_catalog``, ``dia_combined_catalog``,
+        ``coadd_forced`` or ``calexp_forced``.
     """
     release = resolve_data_release(data_release, photometry_method=method)
     method = release.photometry_method
-    if method == "dia_forced_catalog":
-        from release_photometry import query_dia_forced_photometry
+    if method in {"dia_forced_catalog", "dia_source_catalog", "dia_combined_catalog"}:
+        from release_photometry import (
+            query_dia_forced_photometry,
+            query_dia_source_photometry,
+        )
 
         tap_service = tap_service or create_tap_service(release)
-        return query_dia_forced_photometry(
-            targets,
-            tap_service=tap_service,
-            data_release=release,
-            max_workers=max_workers,
-            verbose=verbose,
-        )
+        frames = []
+        if method in {"dia_forced_catalog", "dia_combined_catalog"}:
+            frames.append(query_dia_forced_photometry(
+                targets, tap_service=tap_service, data_release=release,
+                max_workers=max_workers, verbose=verbose,
+            ))
+        if method in {"dia_source_catalog", "dia_combined_catalog"}:
+            frames.append(query_dia_source_photometry(
+                targets, tap_service=tap_service, data_release=release,
+                max_workers=max_workers, verbose=verbose,
+            ))
+        nonempty = [frame for frame in frames if frame is not None and not frame.empty]
+        return pd.concat(nonempty, ignore_index=True, sort=False) if nonempty else pd.DataFrame()
     if coverage is None:
         raise ValueError(f"coverage is required for {method!r} photometry")
     butler = butler or create_butler(release)

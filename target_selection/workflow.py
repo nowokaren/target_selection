@@ -371,7 +371,7 @@ class AnalysisWorkflow:
             requested_photometry_method = reference.spec.options.get("photometry_method")
             if requested_photometry_method is not None:
                 requested_photometry_method = str(requested_photometry_method).strip().lower()
-                allowed_methods = {"coadd_forced", "dia_forced_catalog", "calexp_forced"}
+                allowed_methods = {"coadd_forced", "dia_forced_catalog", "dia_source_catalog", "dia_combined_catalog", "calexp_forced"}
                 if requested_photometry_method not in allowed_methods:
                     raise ValueError(
                         f"Unsupported photometry_method {requested_photometry_method!r} "

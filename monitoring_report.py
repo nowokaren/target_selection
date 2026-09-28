@@ -221,25 +221,30 @@ def plot_monitoring_lightcurve(
         release_bands = sorted(str(band) for band in release_photometry.get("band", pd.Series(dtype=str)).dropna().unique())
         cmap = plt.get_cmap("tab10")
         for index, band in enumerate(release_bands):
-            data = prepare_release_lightcurve_data(release_photometry, band)
-            if data.empty:
-                continue
-            dates = mdates.date2num(data["Timestamp"].to_numpy(dtype="datetime64[us]"))
-            magnitudes = data["Magnitude"].to_numpy(float)
-            errors = data["Error"].to_numpy(float)
-            valid = np.isfinite(dates) & np.isfinite(magnitudes)
-            if not valid.any():
-                continue
-            yerr = np.where(np.isfinite(errors[valid]) & (errors[valid] >= 0), errors[valid], np.nan)
-            methods = release_photometry.get("measurement_method", pd.Series(dtype=str)).astype(str).str.lower()
-            method_label = "DIA" if methods.str.contains("dia").any() else "forced"
-            item = ax.errorbar(
-                dates[valid], magnitudes[valid], yerr=yerr, fmt="s", ms=2.8,
-                mfc=cmap(index % 10), mec="black", mew=.3, color=cmap(index % 10),
-                alpha=.9, label=f"{data_release} {method_label} {band} (N={valid.sum()})", zorder=4,
-            )
-            handles.append(item)
-            has_photometry = True
+            band_rows = release_photometry.loc[release_photometry["band"].astype(str).eq(str(band))].copy()
+            method_values = band_rows.get("measurement_method", pd.Series("release", index=band_rows.index)).astype(str)
+            for method_index, (method, method_rows) in enumerate(band_rows.assign(_method=method_values).groupby("_method", sort=False)):
+                data = prepare_release_lightcurve_data(method_rows, band)
+                if data.empty:
+                    continue
+                dates = mdates.date2num(data["Timestamp"].to_numpy(dtype="datetime64[us]"))
+                magnitudes = data["Magnitude"].to_numpy(float)
+                errors = data["Error"].to_numpy(float)
+                valid = np.isfinite(dates) & np.isfinite(magnitudes)
+                if not valid.any():
+                    continue
+                yerr = np.where(np.isfinite(errors[valid]) & (errors[valid] >= 0), errors[valid], np.nan)
+                method_key = str(method).lower()
+                method_label = {"dia_forced_catalog": "DIA forced", "dia_source_catalog": "DIA source", "coadd_forced": "coadd forced", "calexp_forced": "calexp forced"}.get(method_key, method)
+                marker = "s" if method_key == "dia_forced_catalog" else ("D" if method_key == "dia_source_catalog" else "o")
+                item = ax.errorbar(
+                    dates[valid], magnitudes[valid], yerr=yerr, fmt=marker, ms=2.8,
+                    mfc=cmap((index + method_index) % 10), mec="black", mew=.3,
+                    color=cmap((index + method_index) % 10), alpha=.9,
+                    label=f"{data_release} {method_label} {band} (N={valid.sum()})", zorder=4,
+                )
+                handles.append(item)
+                has_photometry = True
 
     coverage_layers: list[dict] = []
     if (

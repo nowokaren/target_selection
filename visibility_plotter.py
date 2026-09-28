@@ -1107,8 +1107,9 @@ def save_nightly_visibility_plots(
             selection.get("observation_date", pd.Series(dtype=str)).astype(str).eq(night_string)
         ].copy()
         selected = evaluated.loc[evaluated["selected_for_visibility"].astype(bool)].copy()
-        parts = _split_visibility_targets(
-            selected, max_targets_per_plot=max_targets_per_plot
+        parts = (
+            _split_visibility_targets(selected, max_targets_per_plot=max_targets_per_plot)
+            if not selected.empty else []
         )
         expected = []
         for part_index, (source_group, part) in enumerate(parts, start=1):

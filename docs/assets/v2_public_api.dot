@@ -1,0 +1,14 @@
+digraph G {
+  graph [rankdir=LR, bgcolor="white", pad="0.25", nodesep="0.35", ranksep="0.65", fontname="Helvetica"];
+  node [shape=record, style="rounded,filled", fillcolor="#F8F9F9", color="#566573", fontname="Helvetica", fontsize=10, margin="0.12,0.08"];
+  edge [color="#566573", arrowsize=0.7];
+  io [label="{target_io|load(source, filters)\ladd_data(...)\llist_sources()\ldescribe_source(name)\l}", fillcolor="#EAF2F8", color="#2874A6"];
+  reg [label="{CatalogAdapterRegistry|register(...)\lcreate(name)\navailable()\ldescribe(name)\l}"];
+  csv [label="{CsvCatalogAdapter|load(...)\l_normalize(...)\lcapabilities\l}"];
+  vis [label="{visibility|evaluate(...)\nplot(...)\nsequence(...)}", fillcolor="#FCF3CF", color="#B7950B"];
+  collection [label="{CollectionContext|list_tables()\llist_property_maps()\llist_images()\ldescribe()\lget_table(...)\lget_visit_coverage(...)\lget_coadd_coverage(...)\lget_property_map_values(...)\lget_image(...)\l}", fillcolor="#FDEDEC", color="#B03A2E"];
+  report [label="{report|match_summary(...)\lproperty_distributions(...)\lsky_maps(...)\lmain(...)}", fillcolor="#E8F8F5", color="#148F77"];
+  io -> reg -> csv;
+  vis -> io;
+  report -> collection;
+}

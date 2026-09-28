@@ -87,6 +87,7 @@ def create_target_reports(
     release_photometry: pd.DataFrame | None = None,
     output_dir: str | Path = "outputs/target_reports",
     target_names: list[str] | tuple[str, ...] | None = None,
+    max_workers: int | None = None,
     **kwargs,
 ) -> list[Path]:
     """Task: create target dashboard PNGs for many targets."""
@@ -95,22 +96,29 @@ def create_target_reports(
         targets = targets.loc[targets["Target"].astype(str).isin(wanted)].copy()
     paths: list[Path] = []
     print(f"[reports] Creating {len(targets)} target report(s).", flush=True)
+    if max_workers is not None and int(max_workers) > 1:
+        print("[reports] Target reports are generated sequentially; max_workers is ignored.", flush=True)
     try:
         from tqdm.auto import tqdm
         rows = tqdm(list(targets.iterrows()), desc="Target reports", unit="target")
     except ImportError:
         rows = targets.iterrows()
+    errors = 0
     for _, row in rows:
-        paths.append(
-            create_target_report(
-                row,
-                coverage=coverage,
-                release_photometry=release_photometry,
-                output_dir=output_dir,
-                **kwargs,
+        try:
+            paths.append(
+                create_target_report(
+                    row,
+                    coverage=coverage,
+                    release_photometry=release_photometry,
+                    output_dir=output_dir,
+                    **kwargs,
+                )
             )
-        )
-    print(f"[reports] Reports generated/reused: {len(paths)}", flush=True)
+        except Exception as exc:
+            errors += 1
+            print(f"[reports] Skipping {row.get('Target', '<unknown>')}: {exc}", flush=True)
+    print(f"[reports] Reports generated/reused: {len(paths)}; skipped/errors: {errors}", flush=True)
     return paths
 
 

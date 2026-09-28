@@ -1,0 +1,14 @@
+[source]
+name = "qso_extended"
+adapter = "csv"
+path = "data/LaStBeRu_data/LaStBeRu_QSO_extended.csv"
+capabilities = ["targets", "coordinates", "category", "status"]
+
+[columns]
+id = "DB_JNAME"
+ra = "RA"
+dec = "DEC"
+
+[category]
+column = "Status"
+parser = "identity"

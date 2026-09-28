@@ -305,3 +305,52 @@ GitHub Actions runs these tests on every push and pull request. Unit tests do no
 ## Future development
 
 The proposed observability filtering, scientific prioritization, JS/HSH exposure models, and nightly scheduling workflow are documented in [ROADMAP.md](ROADMAP.md). These Target Selection 2.0 ideas are intentionally separated from the validated version 1 pipeline until their scientific and operational criteria are agreed upon.
+
+
+## Interactive visibility reports
+
+The `visibility` command lets you choose a subset of targets and generate nightly
+altitude/visibility plots plus a PDF from the terminal:
+
+```bash
+target-selection visibility \
+  --targets data/hsh_data/hsh_objects.csv \
+  --start-date 2026-09-20 \
+  --end-date 2026-09-25 \
+  --observatory "El Leoncito" \
+  --minimum-altitude 40 \
+  --minimum-minutes 90 \
+  --observing-window 20:30 06:00 \
+  --output outputs/my_visibility
+```
+
+The command first asks for a text fragment, then opens a multi-selection list.
+Use the arrow keys to move, Space to select/deselect, Enter to confirm, or click
+with the mouse in a compatible terminal. Install the optional interactive extra
+if needed:
+
+```bash
+python -m pip install -e '.[interactive]'
+```
+
+For a fully reproducible run without the selector:
+
+```bash
+target-selection visibility \
+  --targets data/hsh_data/hsh_objects.csv \
+  --names OGLE-2025-GD-0006,OGLE-2025-BLG-0451 \
+  --start-date 2026-09-20 \
+  --end-date 2026-09-25 \
+  --non-interactive \
+  --output outputs/selected_visibility
+```
+
+Alternatively, pass a CSV containing one `Target` column with
+`--selection-file`. Add `--match OGLE-2025` to pre-filter the interactive list.
+By default the report plots the selected targets on every requested night, even
+if they do not pass the visibility cut. Add `--only-visible` to plot only the
+target/night rows that pass the configured altitude and minimum-time criteria.
+
+Each run writes `selected_targets.csv`, `visibility_selection.csv`,
+`visibility_summary.csv`, `visibility_config.json`, individual nightly PNGs,
+and `visibility_report.pdf`.

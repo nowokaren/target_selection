@@ -6,6 +6,31 @@ from pathlib import Path
 
 import pandas as pd
 
+
+def _expand_target_dates(targets: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
+    """Build one row per target and requested night.
+
+    Source tables may carry one metadata ``observation_date`` (for example
+    MOP's first visible date). That is not an already-expanded nightly grid,
+    so it must not suppress the other requested nights.
+    """
+    work = targets.copy()
+    dates = pd.date_range(start_date, end_date, freq="D").date
+    id_column = next((name for name in ("target_id", "Target") if name in work), None)
+    unique_targets = work[id_column].nunique() if id_column and len(work) else len(work)
+    has_daily_grid = (
+        "observation_date" in work
+        and len(work) > unique_targets
+        and work["observation_date"].astype(str).nunique() >= len(dates)
+    )
+    if has_daily_grid:
+        return work
+    base = work.drop(columns=["observation_date"], errors="ignore")
+    return pd.concat(
+        [base.assign(observation_date=night.isoformat()) for night in dates],
+        ignore_index=True, sort=False,
+    ) if len(base) else base.assign(observation_date=pd.Series(dtype=str))
+
 from visibility_plotter import (
     build_visibility_selection,
     plot_visibility_sequence,
@@ -30,14 +55,7 @@ def evaluate_visibility(
     if verbose:
         print(f"[visibility] Evaluating {len(targets)} targets from {start_date} to {end_date or start_date}.", flush=True)
     end_date = end_date or start_date
-    target_rows = targets.copy()
-    if "observation_date" not in target_rows:
-        nights = pd.date_range(start_date, end_date, freq="D").date
-        target_rows = pd.concat(
-            [target_rows.assign(observation_date=night.isoformat()) for night in nights],
-            ignore_index=True,
-            sort=False,
-        ) if len(target_rows) else target_rows.assign(observation_date=pd.Series(dtype=str))
+    target_rows = _expand_target_dates(targets, start_date, end_date)
     selection = build_visibility_selection(
         target_rows,
         start_date,
@@ -77,14 +95,7 @@ def save_visibility_plots(
 ) -> list[Path]:
     """Task: save nightly visibility plots from targets or a precomputed selection."""
     end_date = end_date or start_date
-    target_rows = targets.copy()
-    if "observation_date" not in target_rows:
-        nights = pd.date_range(start_date, end_date, freq="D").date
-        target_rows = pd.concat(
-            [target_rows.assign(observation_date=night.isoformat()) for night in nights],
-            ignore_index=True,
-            sort=False,
-        ) if len(target_rows) else target_rows.assign(observation_date=pd.Series(dtype=str))
+    target_rows = _expand_target_dates(targets, start_date, end_date)
     return save_nightly_visibility_plots(
         target_rows,
         start_date,

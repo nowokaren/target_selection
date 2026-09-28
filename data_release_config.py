@@ -31,6 +31,7 @@ class DataReleaseConfig:
     default_visit_exptime_s: float | None = 30.0
     tap_dia_object_table: str | None = None
     tap_dia_forced_source_table: str | None = None
+    tap_dia_source_table: str | None = None
     notes: str = ""
 
     def visit_select(self, alias: str = "vd") -> str:
@@ -102,6 +103,7 @@ RELEASES: dict[str, DataReleaseConfig] = {
         photometry_method="coadd_forced",
         tap_dia_object_table="dp2.DiaObject",
         tap_dia_forced_source_table="dp2.ForcedSourceOnDiaObject",
+        tap_dia_source_table="dp2.DiaSource",
         notes=("Early DP2 publishes deep coadds but not calibrated individual visit images; "
                "target photometry is therefore measured on the coadds."),
     ),

@@ -574,6 +574,125 @@ def query_dia_forced_photometry(
     return pd.concat(frames, ignore_index=True) if frames else _empty_forced_photometry()
 
 
+
+def query_dia_source_photometry(
+    targets: pd.DataFrame,
+    *,
+    tap_service,
+    data_release: "DataReleaseConfig",
+    match_radius_arcsec: float = 1.0,
+    max_workers: int = 4,
+    verbose: bool = True,
+    on_target_result=None,
+) -> pd.DataFrame:
+    """Fetch direct ``DiaSource`` photometry for the nearest DiaObject.
+
+    ``DiaSource`` contains the direct per-visit source measurement, whereas
+    ``ForcedSourceOnDiaObject`` contains the forced measurement at the DIA
+    object position.  Both are associated with the same ``DiaObject`` and are
+    returned with distinct ``measurement_method`` values so plots can show
+    them separately.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from astropy.coordinates import SkyCoord
+    import astropy.units as u
+
+    table = getattr(data_release, "tap_dia_source_table", None)
+    object_table = data_release.tap_dia_object_table
+    if object_table is None or table is None:
+        raise ValueError(f"{data_release.name} has no configured DiaSource table.")
+    radius_deg = float(match_radius_arcsec) / 3600.0
+
+    def fetch_one(row: pd.Series) -> pd.DataFrame:
+        target = str(row["Target"])
+        ra, dec = float(row["RA_deg"]), float(row["Dec_deg"])
+        provenance = {
+            "Target": target, "RA_deg": ra, "Dec_deg": dec,
+            "data_release": data_release.name,
+            "butler_collection": str(data_release.butler_collections),
+            "measurement_method": "dia_source_catalog",
+            "dataset_type": "DiaSource",
+            "Telescope": f"LSST-{data_release.name}",
+            "Provider": "LSST", "Source": f"LSST-{data_release.name}",
+            "Collection": str(data_release.butler_collections),
+        }
+        try:
+            objects = _tap_to_frame(tap_service, f"""
+                SELECT diaObjectId, ra, dec
+                FROM {object_table}
+                WHERE CONTAINS(POINT('ICRS', ra, dec),
+                    CIRCLE('ICRS', {ra}, {dec}, {radius_deg})) = 1
+            """)
+            if objects.empty:
+                return pd.DataFrame([{**provenance, "measurement_status": "no_dia_object",
+                                      "message": f"No DiaObject within {match_radius_arcsec:g} arcsec."}])
+            target_coord = SkyCoord(ra * u.deg, dec * u.deg)
+            object_coord = SkyCoord(
+                pd.to_numeric(objects["ra"], errors="coerce").to_numpy() * u.deg,
+                pd.to_numeric(objects["dec"], errors="coerce").to_numpy() * u.deg,
+            )
+            separation = target_coord.separation(object_coord).arcsec
+            selected_index = objects.index[int(np.nanargmin(separation))]
+            dia_object_id = int(objects.at[selected_index, "diaObjectId"])
+            match_metadata = {
+                "diaObjectId": dia_object_id,
+                "dia_match_sep_arcsec": float(np.nanmin(separation)),
+                "dia_object_ra_deg": float(objects.at[selected_index, "ra"]),
+                "dia_object_dec_deg": float(objects.at[selected_index, "dec"]),
+            }
+            source = _tap_to_frame(tap_service, f"""
+                SELECT ds.diaObjectId AS diaObjectId, ds.visit AS visitId,
+                       ds.detector AS detector, ds.band AS band,
+                       ds.psfFlux AS direct_flux_njy,
+                       ds.psfFluxErr AS direct_flux_err_njy,
+                       ds.psfFlux_flag AS direct_flux_flag,
+                       vd.expMidptMJD AS expMidptMJD
+                FROM {table} AS ds, {data_release.tap_visit_table} AS vd
+                WHERE ds.visit = vd.{data_release.visit_columns['visitId']}
+                  AND ds.detector = vd.{data_release.visit_columns['detector']}
+                  AND ds.diaObjectId = {dia_object_id}
+            """)
+            if source.empty:
+                return pd.DataFrame([{**provenance, **match_metadata,
+                                      "measurement_status": "dia_object_without_source_rows",
+                                      "message": "Matched DiaObject has no DiaSource rows."}])
+            # DiaSource does not expose the difference-flux columns used by
+            # ForcedSourceOnDiaObject. Keep a common schema and mark them absent.
+            for column in ("difference_flux_njy", "difference_flux_err_njy", "difference_flux_flag"):
+                source[column] = np.nan
+            source["magnitude"], source["magnitude_err"] = _nanojansky_to_magnitude(
+                source["direct_flux_njy"], source["direct_flux_err_njy"])
+            source["inst_flux"] = source["direct_flux_njy"]
+            source["inst_flux_err"] = source["direct_flux_err_njy"]
+            source["measurement_flag"] = source["direct_flux_flag"]
+            source["measurement_status"] = "measured"
+            source["message"] = ""
+            for key, value in {**provenance, **match_metadata}.items():
+                source[key] = value
+            return source
+        except Exception as exc:
+            return pd.DataFrame([{**provenance, "measurement_status": "tap_query_error", "message": str(exc)}])
+
+    rows = [row for _, row in targets[["Target", "RA_deg", "Dec_deg"]].dropna().iterrows()]
+    workers = max(1, min(int(max_workers), len(rows))) if rows else 1
+    if workers == 1:
+        frames = [fetch_one(row) for row in rows]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            frames = list(executor.map(fetch_one, rows))
+    result = pd.concat(frames, ignore_index=True) if frames else _empty_forced_photometry()
+    if on_target_result is not None:
+        for frame in frames:
+            on_target_result(frame)
+    if verbose:
+        measured = int(result.get("measurement_status", pd.Series(dtype=str)).astype(str).eq("measured").sum())
+        print(
+            f"[lsst] DiaSource rows returned: {len(result)} "
+            f"({measured} measured; {result['Target'].nunique() if 'Target' in result else 0} targets).",
+            flush=True,
+        )
+    return result
+
 def target_release_photometry_path(cache_dir: str | Path, target_name: str) -> Path:
     """Return the persistent Rubin-photometry CSV path for one target."""
     import re

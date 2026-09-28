@@ -1,0 +1,14 @@
+[source]
+name = "lastberu_watchlist"
+adapter = "csv"
+path = "data/LaStBeRu_data/LaStBeRu_watchlist_LSST_grades.csv"
+capabilities = ["targets", "coordinates", "category"]
+
+[columns]
+id = "object_id"
+ra = "ra"
+dec = "dec"
+
+[category]
+column = "extra_info"
+parser = "first_extra_value"

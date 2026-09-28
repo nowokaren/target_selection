@@ -90,7 +90,9 @@ capabilities = ["visits", "images", "photometry"]
 data_release = "DP2"
 # Choose how Rubin photometry is added to target reports and lightcurves.pdf:
 # "coadd_forced" measures the target position on each available deep coadd;
-# "dia_forced_catalog" matches to DiaObject and retrieves its DIA forced-source curve.
+# "dia_forced_catalog" retrieves ForcedSourceOnDiaObject;
+# "dia_source_catalog" retrieves direct DiaSource points;
+# "dia_combined_catalog" plots both catalog products separately.
 photometry_method = "dia_forced_catalog"
 
 # Less frequently changed cache policy.

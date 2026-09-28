@@ -1,0 +1,10 @@
+[source]
+name = "hsh_events"
+adapter = "csv"
+path = "data/hsh_data/hsh_objects.csv"
+capabilities = ["targets", "coordinates", "observations"]
+
+[columns]
+id = "object"
+ra = "ra_deg"
+dec = "dec_deg"

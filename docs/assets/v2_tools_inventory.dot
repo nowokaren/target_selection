@@ -1,0 +1,45 @@
+digraph G {
+  graph [rankdir=LR, bgcolor="white", pad="0.25", nodesep="0.28", ranksep="0.55", fontname="Helvetica"];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=9, margin="0.10,0.06"];
+  edge [color="#7F8C8D", arrowsize=0.6];
+  subgraph cluster_api { label="Public API"; color="#5DADE2"; style="rounded";
+    io [label="target_io\nload · add_data\nlist/describe sources/adapters", fillcolor="#D6EAF8", color="#2874A6"];
+    collection_api [label="CollectionContext\nget coverage · maps\nget_image", fillcolor="#D6EAF8", color="#2874A6"];
+    report [label="report\nmatch_summary · distributions\nsky_maps · main", fillcolor="#D6EAF8", color="#2874A6"];
+  }
+  subgraph cluster_sources { label="Sources and adapters"; color="#58D68D"; style="rounded";
+    catalogs [label="sources.catalog_adapters\nCatalogAdapter\nCsvCatalogAdapter\nCatalogAdapterRegistry", fillcolor="#D5F5E3", color="#148F77"];
+    collection [label="collection_access\nCollectionContext\nlist/get/describe methods", fillcolor="#D5F5E3", color="#148F77"];
+    rsp [label="rsp_access\nget_table · get_image\ncoverage · property maps", fillcolor="#D5F5E3", color="#148F77"];
+    lsst [label="sources.lsst\nrelease · TAP · Butler\ncoverage · photometry", fillcolor="#D5F5E3", color="#148F77"];
+    mop [label="sources.mop\nMOP client\nauthoritative coordinates", fillcolor="#D5F5E3", color="#148F77"];
+  }
+  subgraph cluster_selection { label="Selection and surveys"; color="#AF7AC5"; style="rounded";
+    visibility [label="tasks.visibility\nevaluate_visibility\nsequence · plots", fillcolor="#E8DAEF", color="#7D3C98"];
+    targets [label="tasks.targets\nload_target_list\ncollect/merge/restrict", fillcolor="#E8DAEF", color="#7D3C98"];
+    surveys [label="tasks.surveys\nHSH inventory\nobserved_targets", fillcolor="#E8DAEF", color="#7D3C98"];
+  }
+  subgraph cluster_support { label="Products and configuration"; color="#F5CBA7"; style="rounded";
+    config [label="config\nAnalysisConfig\nSourceSpec · settings", fillcolor="#FDEBD0", color="#AF601A"];
+    reporting [label="reporting\nwrite summaries\ndistributions", fillcolor="#FDEBD0", color="#AF601A"];
+    products [label="products\nproduct index\nsky plots", fillcolor="#FDEBD0", color="#AF601A"];
+  }
+  subgraph cluster_legacy { label="Historical / legacy"; color="#BFC9CA"; style="rounded,dashed";
+    reference [label="reference_catalog\ncoverage · properties\nprioritized cutouts", fillcolor="#F2F4F4", color="#7F8C8D"];
+    workflow [label="workflow / backend\nlarge orchestration", fillcolor="#F2F4F4", color="#7F8C8D"];
+    pipeline [label="tasks.pipeline\nTaskRunResult\nlegacy task runner", fillcolor="#F2F4F4", color="#7F8C8D"];
+  }
+  io -> catalogs [color="#2874A6", penwidth=1.2];
+  collection_api -> collection [color="#2874A6", penwidth=1.2];
+  collection -> rsp [color="#148F77", penwidth=1.1];
+  collection -> lsst [color="#148F77", penwidth=1.1];
+  report -> reporting [color="#2874A6", penwidth=1.1];
+  report -> products [color="#2874A6", penwidth=1.1];
+  visibility -> io [style=dashed];
+  targets -> io [style=dashed];
+  surveys -> io [style=dashed];
+  config -> catalogs [style=dashed];
+  reference -> rsp [style=dashed, color="#7F8C8D"];
+  workflow -> reference [style=dashed, color="#7F8C8D"];
+  pipeline -> workflow [style=dashed, color="#7F8C8D"];
+}
