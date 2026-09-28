@@ -10,3 +10,5 @@ The notebooks in `notebooks/v2/` are the examples for the modular API under deve
 | `04_photometry_and_lightcurves.ipynb` | Cache photometry and build light-curve products |
 | `05_developer_add_an_adapter.ipynb` | Add a new API adapter, such as OGLE |
 | `06_microlensing_followup_prioritization.ipynb` | Prioritize HSH/JS microlensing follow-up for an El Leoncito season |
+| `08_ogle_data_access.ipynb` | Inspect the public OGLE EWS table, filters and event photometry |
+| `09_opm_data_access.ipynb` | Inspect the public OPM ranking and prepare authenticated access |

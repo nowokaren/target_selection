@@ -31,6 +31,25 @@ The normalized observation fields include `epoch_hjd`, `band="I"`,
 `magnitude`, `magnitude_err`, `seeing_arcsec`, `sky_background` and
 `is_usable`.
 
+### Meaning of the EWS microlensing parameters
+
+The EWS table reports a preliminary point-lens model with blending:
+
+| OGLE field | Normalized field | Meaning |
+|---|---|---|
+| `Tmax` | `t0_hjd` | Fitted time of maximum magnification, HJD. |
+| `tau` | `tE_days` | Fitted Einstein timescale, in days. |
+| `Umin` | `u0` | Minimum lens-source separation in Einstein-radius units. |
+| `Amax` | — | Maximum amplification. |
+| `Dmag` | — | Maximum brightening in magnitudes. |
+| `fbl` | — | Blending ratio. |
+| `Ibl` | — | Total baseline I-band magnitude. |
+| `I0` | — | Estimated lens/base I-band magnitude from the model. |
+
+These parameters describe the microlensing model, but they are not final
+measurements. OGLE explicitly warns that the fit parameters may change as the
+event develops.
+
 Sources: [OGLE EWS](https://ogle.astrouw.edu.pl/ogle4/ews/ews.html) and the
 [OGLE 2026 data directory](https://www.astrouw.edu.pl/ogle/ogle4/ews/2026/).
 
@@ -58,4 +77,3 @@ Credentials are read from `TARGET_SELECTION_OPM_USERNAME` and
 never stored in the repository.
 
 Source: [Galactic Science OPM](https://lensingtom.zah.uni-heidelberg.de/).
-
