@@ -76,7 +76,16 @@ class OGLEAdapter:
     def supports(self, feature: str) -> bool:
         return str(feature).lower() in self.features
 
-    def load_targets(self, *, filters: Mapping[str, object] | None = None, season: int | str | None = None, **_) -> pd.DataFrame:
+    def load_targets(
+        self,
+        *,
+        filters: Mapping[str, object] | None = None,
+        season: int | str | None = None,
+        magnitude_range: tuple[float | None, float | None] | None = None,
+        ra_range: tuple[float, float] | None = None,
+        dec_range: tuple[float, float] | None = None,
+        **_,
+    ) -> pd.DataFrame:
         response = self.session.get(self.ews_url, timeout=self.timeout)
         response.raise_for_status()
         text = response.content.decode("latin-1")
@@ -107,6 +116,22 @@ class OGLEAdapter:
         if filters:
             from .catalog_adapters import _apply_filters
             table = _apply_filters(table, filters, category_column="category", magnitude_column="magnitude_baseline_I", source_name=self.name)
+        if magnitude_range is not None:
+            lower, upper = magnitude_range
+            magnitude = pd.to_numeric(table["magnitude_baseline_I"], errors="coerce")
+            if lower is not None:
+                table = table.loc[magnitude.ge(float(lower))].copy()
+            if upper is not None:
+                table = table.loc[magnitude.le(float(upper))].copy()
+        if ra_range is not None:
+            ra_min, ra_max = (float(value) for value in ra_range)
+            ra = pd.to_numeric(table["ra_deg"], errors="coerce")
+            ra_mask = ra.ge(ra_min) & ra.le(ra_max) if ra_min <= ra_max else ra.ge(ra_min) | ra.le(ra_max)
+            table = table.loc[ra_mask].copy()
+        if dec_range is not None:
+            dec_min, dec_max = (float(value) for value in dec_range)
+            dec = pd.to_numeric(table["dec_deg"], errors="coerce")
+            table = table.loc[dec.ge(dec_min) & dec.le(dec_max)].copy()
         return validate_targets(table)
 
     def photometry(self, targets: pd.DataFrame, *, cache_dir: str | Path | None = None, refresh: bool = False, errors: str = "raise", **_) -> pd.DataFrame:
@@ -143,4 +168,3 @@ class OGLEAdapter:
         return validate_observations(normalize_observations(pd.concat(records, ignore_index=True), provider=self.name))
 
     epochs = photometry
-
