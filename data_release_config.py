@@ -20,7 +20,7 @@ class DataReleaseConfig:
     butler_repo: str
     butler_collections: str | tuple[str, ...] | None
     tap_visit_table: str
-    visit_columns: Mapping[str, str]
+    visit_columns: Mapping[str, str | None]
     coadd_dataset_types: tuple[str, ...]
     coadd_spatial_where: str
     calexp_dataset_types: tuple[str, ...] = ("calexp",)
@@ -39,8 +39,14 @@ class DataReleaseConfig:
         missing = [name for name in required if name not in self.visit_columns]
         if missing:
             raise ValueError(f"{self.name}: missing TAP aliases: {missing}")
+        # Qserv needs a numeric expression to type a missing depth column.
         return ", ".join(
-            f"{alias}.{self.visit_columns[name]} AS {name}" for name in required
+            (
+                f"{alias}.{self.visit_columns[name]} AS {name}"
+                if self.visit_columns[name] is not None
+                else f"{alias}.{self.visit_columns['seeing']} * NULL AS {name}"
+            )
+            for name in required
         )
 
     def calexp_data_id(self, visit_id: int, detector: int) -> dict[str, int]:
@@ -69,6 +75,16 @@ _CCD_VISIT_COLUMNS = {
     "detector": "detector", "seeing": "seeing", "magLim": "magLim",
     "ra": "s_ra", "dec": "s_dec",
 }
+_DP0_2_VISIT_COLUMNS = {
+    "visitId": "visitId", "expMidptMJD": "expMidptMJD", "band": "band",
+    "detector": "detector", "seeing": "seeing", "magLim": None,
+    "ra": "ra", "dec": "decl",
+}
+_DP1_VISIT_COLUMNS = {
+    "visitId": "visitId", "expMidptMJD": "expMidptMJD", "band": "band",
+    "detector": "detector", "seeing": "seeing", "magLim": "magLim",
+    "ra": "ra", "dec": "dec",
+}
 
 RELEASES: dict[str, DataReleaseConfig] = {
     "DP0.1": DataReleaseConfig(
@@ -83,13 +99,13 @@ RELEASES: dict[str, DataReleaseConfig] = {
         name="DP0.2", rsp_instance="dp02", butler_repo="dp02",
         butler_collections="2.2i/runs/DP0.2",
         tap_visit_table="dp02_dc2_catalogs.CcdVisit",
-        visit_columns=_CCD_VISIT_COLUMNS, coadd_dataset_types=("deepCoadd",),
+        visit_columns=_DP0_2_VISIT_COLUMNS, coadd_dataset_types=("deepCoadd",),
         coadd_spatial_where="patch.region OVERLAPS POINT(:ra,:dec)",
     ),
     "DP1": DataReleaseConfig(
         name="DP1", rsp_instance="dp1", butler_repo="dp1",
         butler_collections="LSSTComCam/DP1", tap_visit_table="dp1.CcdVisit",
-        visit_columns=_CCD_VISIT_COLUMNS,
+        visit_columns=_DP1_VISIT_COLUMNS,
         calexp_dataset_types=("visit_image",),
         coadd_dataset_types=("deep_coadd", "deepCoadd"),
         coadd_spatial_where="patch.region OVERLAPS POINT(:ra,:dec)",
