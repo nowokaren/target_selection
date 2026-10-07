@@ -37,6 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     auth_set.add_argument("--backend", choices=("keyring", "netrc"), default="keyring")
     auth_test = auth_commands.add_parser("test", help="Check whether credentials can be resolved")
     auth_test.add_argument("provider")
+    auth_test.add_argument("--remote", action="store_true", help="Verify BHTOM credentials with its token endpoint")
     auth_remove = auth_commands.add_parser("remove", help="Remove keyring credentials")
     auth_remove.add_argument("provider")
     return parser
@@ -47,6 +48,9 @@ def main(argv: list[str] | None = None) -> int:
     if raw_argv and raw_argv[0] == "visibility":
         from .visibility_cli import main as visibility_main
         return visibility_main(raw_argv[1:])
+    if raw_argv and raw_argv[0] == "plan":
+        from .planning_cli import main as planning_main
+        return planning_main(raw_argv[1:])
     args = build_parser().parse_args(raw_argv)
     if args.command == "list-sources":
         print(json.dumps(default_adapter_registry().available(), indent=2))
@@ -68,6 +72,19 @@ def main(argv: list[str] | None = None) -> int:
             if credentials is None:
                 print(f"No credentials found for {args.provider}.")
                 return 1
+            if args.remote:
+                if args.provider.lower() != "bhtom":
+                    print("Remote verification is currently available only for bhtom.", file=sys.stderr)
+                    return 2
+                from requests import RequestException
+                from target_selection.sources.bhtom import BHTOMAdapter
+                try:
+                    BHTOMAdapter().login(username=credentials.username, password=credentials.password)
+                except (PermissionError, RuntimeError, RequestException) as exc:
+                    print(f"BHTOM access check failed: {exc}", file=sys.stderr)
+                    return 1
+                print("BHTOM access verified; authentication token received.")
+                return 0
             print(f"Credentials found for {args.provider} using {credentials.backend}.")
             return 0
         if args.auth_command == "remove":

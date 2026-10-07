@@ -17,6 +17,9 @@ from .data_source import DataSourceRegistry, ProviderHandle, data_source
 from .target_io import describe_adapter, describe_source, list_adapters, list_sources
 from .products import plot_sky_dual_metric
 from .reporting import numeric_series, plot_collection_distributions, write_collection_summaries
+from .planning import (load_provider_targets, collect_provider_photometry, apply_magnitude_limit,
+                       summarize_visibility, save_visibility_products, save_target_sky_map,
+                       save_priority_products, save_planning_pdf)
 from .rsp_access import (
     describe, get_coadd_coverage, get_coadd_cutouts, get_image, get_property_map_values,
     get_table, get_visit_coverage, list_images, list_property_maps, list_tables,
@@ -105,6 +108,14 @@ __all__ = [
     "numeric_series",
     "write_collection_summaries",
     "plot_collection_distributions",
+    "summarize_visibility",
+    "load_provider_targets",
+    "collect_provider_photometry",
+    "apply_magnitude_limit",
+    "save_visibility_products",
+    "save_target_sky_map",
+    "save_priority_products",
+    "save_planning_pdf",
     "get_property_map_values",
     "get_table",
     "get_visit_coverage",

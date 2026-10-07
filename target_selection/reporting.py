@@ -22,7 +22,8 @@ def numeric_series(frame: pd.DataFrame, column: str) -> pd.Series:
 def _bool_series(frame: pd.DataFrame, column: str) -> pd.Series:
     if column not in frame:
         return pd.Series(False, index=frame.index, dtype=bool)
-    return frame[column].fillna(False).astype(bool)
+    values = frame[column].infer_objects(copy=False) if frame[column].dtype == object else frame[column]
+    return values.fillna(False).astype(bool)
 
 
 def _style_table(table, fontsize: float) -> None:
@@ -40,6 +41,59 @@ def _style_table(table, fontsize: float) -> None:
         elif row == len(table.get_celld()) - 1:
             cell.visible_edges = "B"
             cell.set_linewidth(0.8)
+
+
+def write_table_png(
+    frame: pd.DataFrame,
+    output_path: str | Path,
+    *,
+    title: str,
+    subtitle: str | None = None,
+    fontsize: float = 7.0,
+    dpi: int = 220,
+    max_rows: int | None = None,
+) -> Path:
+    """Write a compact CSV-like table as a high-resolution PNG.
+
+    This is the shared simple table style used by the collection summaries.
+    Wide scientific planning tables may still use their specialized renderer
+    in ``observing_selection_summary.py``.
+    """
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    display = frame.copy()
+    if max_rows is not None:
+        display = display.head(int(max_rows))
+    if display.empty:
+        display = pd.DataFrame({"Information": ["No rows available"]})
+    for column in display.columns:
+        if pd.api.types.is_numeric_dtype(display[column]):
+            display[column] = display[column].map(
+                lambda value: "" if pd.isna(value) else f"{value:g}"
+            )
+        else:
+            display[column] = display[column].fillna("").astype(str)
+    n_rows, n_columns = display.shape
+    width = max(8.5, min(24.0, 1.2 + 1.15 * n_columns))
+    height = max(2.2, min(32.0, 1.1 + 0.34 * (n_rows + 1)))
+    fig, axis = plt.subplots(figsize=(width, height), dpi=dpi)
+    axis.axis("off")
+    top = 0.90 if subtitle else 0.94
+    table = axis.table(
+        cellText=display.values,
+        colLabels=[str(column) for column in display.columns],
+        cellLoc="center",
+        colLoc="center",
+        loc="center",
+        bbox=[0, 0, 1, top],
+    )
+    _style_table(table, fontsize)
+    axis.set_title(title, fontsize=11, fontweight="bold", pad=2)
+    if subtitle:
+        fig.text(0.5, 0.955, subtitle, ha="center", va="top", fontsize=7.5)
+    fig.savefig(output, dpi=dpi, bbox_inches="tight", pad_inches=0.03)
+    plt.close(fig)
+    return output
 
 
 def add_cutout_status_columns(
@@ -106,17 +160,21 @@ def write_collection_summaries(
         label = "unknown" if category_text.lower() in {"", "nan", "none", "unavailable"} else category_text
         rows.append({"category": label, "type": "visits", "total": int(_bool_series(subset, "has_visit_coverage").sum()), **{band: int(numeric_series(subset, f"n_images_{band}").fillna(0).gt(0).sum()) for band in bands}})
         rows.append({"category": label, "type": "coadds_found", "total": int(_bool_series(subset, "has_coadd").sum()), **{band: int(_bool_series(subset, f"has_coadd_{band}").sum()) for band in bands}})
-        rows.append({"category": label, "type": "coadds_with_valid_metrics", "total": int(_bool_series(subset, "has_valid_coadd").sum()), **{band: int(_bool_series(subset, f"has_valid_coadd_{band}").sum()) for band in bands}})
-        rows.append({"category": label, "type": "coadds_with_no_valid_pixels", "total": int(_bool_series(subset, "has_empty_coadd").sum()), **{band: int(_bool_series(subset, f"has_empty_coadd_{band}").sum()) for band in bands}})
+        rows.append({"category": label, "type": "coadds_with_valid_metrics", "total": int(_bool_series(subset, "has_valid_metrics_any").sum()), **{band: int(_bool_series(subset, f"has_valid_metrics_{band}").sum()) for band in bands}})
+        rows.append({"category": label, "type": "coadds_with_valid_pixels", "total": int(_bool_series(subset, "has_valid_pixels_any").sum()), **{band: int(_bool_series(subset, f"has_valid_pixels_{band}").sum()) for band in bands}})
+        rows.append({"category": label, "type": "coadds_with_valid_coadd", "total": int(_bool_series(subset, "has_valid_coadd_any").sum()), **{band: int(_bool_series(subset, f"has_valid_coadd_{band}").sum()) for band in bands}})
     summary = pd.DataFrame(rows, columns=["category", "type", "total", *bands])
-    summary.to_csv(out / f"summary_by_{category_column}.csv", index=False)
+    # ``None`` means that the input has no grouping column.  Do not expose
+    # that Python implementation detail in the output filename.
+    summary_stem = "all" if category_column is None else str(category_column)
+    summary.to_csv(out / f"summary_by_{summary_stem}.csv", index=False)
 
-    band_rows = [{"band": band, "targets_with_visits": int(numeric_series(group, f"n_images_{band}").fillna(0).gt(0).sum()), "coadds_found": int(_bool_series(group, f"has_coadd_{band}").sum()), "coadds_with_valid_metrics": int(_bool_series(group, f"has_valid_coadd_{band}").sum()), "coadds_with_no_valid_pixels": int(_bool_series(group, f"has_empty_coadd_{band}").sum())} for band in bands]
-    band_rows.append({"band": "total", "targets_with_visits": int(_bool_series(group, "has_visit_coverage").sum()), "coadds_found": int(_bool_series(group, "has_coadd").sum()), "coadds_with_valid_metrics": int(_bool_series(group, "has_valid_coadd").sum()), "coadds_with_no_valid_pixels": int(_bool_series(group, "has_empty_coadd").sum())})
+    band_rows = [{"band": band, "targets_with_visits": int(numeric_series(group, f"n_images_{band}").fillna(0).gt(0).sum()), "coadds_found": int(_bool_series(group, f"has_coadd_{band}").sum()), "coadds_with_valid_metrics": int(_bool_series(group, f"has_valid_metrics_{band}").sum()), "coadds_with_valid_pixels": int(_bool_series(group, f"has_valid_pixels_{band}").sum()), "coadds_with_valid_coadd": int(_bool_series(group, f"has_valid_coadd_{band}").sum())} for band in bands]
+    band_rows.append({"band": "total", "targets_with_visits": int(_bool_series(group, "has_visit_coverage").sum()), "coadds_found": int(_bool_series(group, "has_coadd").sum()), "coadds_with_valid_metrics": int(_bool_series(group, "has_valid_metrics_any").sum()), "coadds_with_valid_pixels": int(_bool_series(group, "has_valid_pixels_any").sum()), "coadds_with_valid_coadd": int(_bool_series(group, "has_valid_coadd_any").sum())})
     band_summary = pd.DataFrame(band_rows)
     band_summary.to_csv(out / "summary_by_band.csv", index=False)
 
-    shown_band = band_summary.rename(columns={"band": "Band", "targets_with_visits": "Targets with visits", "coadds_found": "Coadds found", "coadds_with_valid_metrics": "Coadds with valid metrics", "coadds_with_no_valid_pixels": "Coadds with no valid pixels"}).copy()
+    shown_band = band_summary.rename(columns={"band": "Band", "targets_with_visits": "Targets with visits", "coadds_found": "Coadds found", "coadds_with_valid_metrics": "Coadds with valid metrics", "coadds_with_valid_pixels": "Coadds with valid pixels", "coadds_with_valid_coadd": "Valid coadds"}).copy()
     for column in shown_band.columns[1:]: shown_band[column] = shown_band[column].map(lambda value: f"{int(value):,}")
     fig, axis = plt.subplots(figsize=(8.5, 2.4), dpi=220)
     axis.axis("off")
@@ -131,14 +189,14 @@ def write_collection_summaries(
     group.to_csv(out / "coverage_and_coadds.csv", index=False)
 
     shown = summary.rename(columns={"category": category_label, "type": "Type", "total": "Total"}).copy()
-    shown["Type"] = shown["Type"].map({"visits": "Visits", "coadds_found": "Coadds found", "coadds_with_valid_metrics": "Coadds with\nvalid metrics", "coadds_with_no_valid_pixels": "Coadds with\nno valid pixels"})
+    shown["Type"] = shown["Type"].map({"visits": "Visits", "coadds_found": "Coadds found", "coadds_with_valid_metrics": "Coadds with\nvalid metrics", "coadds_with_valid_pixels": "Coadds with\nvalid pixels", "coadds_with_valid_coadd": "Valid coadds"}).fillna(shown["Type"])
     for column in shown.columns[2:]: shown[column] = shown[column].map(lambda value: f"{int(value):,}")
     fig, axis = plt.subplots(figsize=(9.5, 5.0), dpi=220)
     axis.axis("off")
     table = axis.table(cellText=shown.values, colLabels=list(shown.columns), cellLoc="center", loc="center", bbox=[0, 0.015, 1, 0.91])
     _style_table(table, 7.0)
     axis.set_title(f"{name}: visits and coadds by {category_label}", fontsize=10, fontweight="bold", y=0.975, pad=0)
-    fig.savefig(out / f"summary_by_{category_column}.png", dpi=220, bbox_inches="tight", pad_inches=0.02)
+    fig.savefig(out / f"summary_by_{summary_stem}.png", dpi=220, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
     return summary
 

@@ -14,12 +14,14 @@ dependencies = [
   "matplotlib>=3.7",
   "tqdm>=4.66",
   "astropy>=6",
+  "requests>=2.31",
   "tomli>=2; python_version < '3.11'",
   "mop-api @ git+https://github.com/nowokaren/mop_api.git@069ee486518f514778b0b102e66bce866e6e6f2b",
 ]
 
 [project.scripts]
 target-selection = "target_selection.cli:main"
+target-selection-plan = "target_selection.planning_cli:main"
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
@@ -29,7 +31,7 @@ credentials = ["keyring>=25"]
 
 [tool.setuptools]
 py-modules = ["target_selection_pipeline", "data_release_config", "mop_photometry", "release_photometry", "target_report", "visibility_plotter", "observatory_observations", "target_registry", "monitoring_report", "target_region"]
-packages = ["target_selection", "target_selection.sources"]
+packages = ["target_selection", "target_selection.sources", "scripts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
