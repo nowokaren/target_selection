@@ -17,7 +17,7 @@ from .data_source import DataSourceRegistry, ProviderHandle, data_source
 from .target_io import describe_adapter, describe_source, list_adapters, list_sources
 from .products import plot_sky_dual_metric
 from .reporting import numeric_series, plot_collection_distributions, write_collection_summaries
-from .planning import (load_provider_targets, collect_provider_photometry, apply_magnitude_limit,
+from .planning import (load_candidates, collect_photometry, load_provider_targets, collect_provider_photometry, apply_magnitude_limit,
                        summarize_visibility, save_visibility_products, save_target_sky_map,
                        save_priority_products, save_planning_pdf)
 from .rsp_access import (
@@ -111,6 +111,8 @@ __all__ = [
     "summarize_visibility",
     "load_provider_targets",
     "collect_provider_photometry",
+    "load_candidates",
+    "collect_photometry",
     "apply_magnitude_limit",
     "save_visibility_products",
     "save_target_sky_map",

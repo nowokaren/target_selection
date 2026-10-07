@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from .planning import (
-    apply_magnitude_limit, collect_provider_photometry, load_provider_targets,
+    apply_magnitude_limit, collect_photometry, load_candidates,
     save_planning_pdf, save_priority_products, save_target_sky_map,
     save_visibility_products,
 )
@@ -30,12 +30,12 @@ def main(argv: list[str] | None = None) -> int:
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     providers = tuple(item.strip().lower() for item in args.providers.split(",") if item.strip())
-    targets = load_provider_targets(providers, start_date=args.start_date, end_date=args.end_date, include_photometry=args.with_photometry, cache_dir=output / "cache")
+    targets = load_candidates(providers, start_date=args.start_date, end_date=args.end_date, include_photometry=args.with_photometry, cache_dir=output / "cache")
     if targets.empty:
         print("No targets were loaded.")
         return 1
     targets.to_csv(output / "targets_loaded.csv", index=False)
-    observations = collect_provider_photometry(targets, providers=providers, cache_dir=output / "cache" / "photometry") if args.with_photometry else pd.DataFrame()
+    observations = collect_photometry(targets, providers=providers, cache_dir=output / "cache" / "photometry") if args.with_photometry else pd.DataFrame()
     if args.with_photometry:
         observations.to_csv(output / "observations.csv", index=False)
     candidates = apply_magnitude_limit(targets, args.magnitude_max)

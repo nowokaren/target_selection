@@ -57,7 +57,7 @@ class ProviderHandle:
 
 class MOPHandle(ProviderHandle):
     def __init__(self) -> None:
-        super().__init__("mop", "tom", ("targets", "parameters", "visibility"))
+        super().__init__("mop", "tom", ("targets", "parameters", "photometry", "visibility"))
 
     def load_targets(self, *, observatory: str = "El Leoncito", start_date: str | None = None, end_date: str | None = None, filters: dict[str, Any] | None = None, **kwargs) -> pd.DataFrame:
         if start_date is None:
@@ -73,6 +73,38 @@ class MOPHandle(ProviderHandle):
     def parameters(self, targets: pd.DataFrame, *, fields: tuple[str, ...] | None = None, **kwargs) -> pd.DataFrame:
         from .sources.mop import load_event_data
         return load_event_data(targets, fields=fields, **kwargs)
+
+    def photometry(self, targets: pd.DataFrame, *, client=None, cache_dir="outputs/mop_photometry", refresh: bool = False, errors: str = "ignore", verbose: bool = True, **_) -> pd.DataFrame:
+        """Return normalized MOP photometry for one or many targets."""
+        from mop_photometry import load_event_photometry
+        from .sources.mop import create_client
+
+        if "target_id" not in targets and "Target" not in targets:
+            raise ValueError("MOP photometry requires target_id or Target.")
+        if client is None:
+            client = create_client()
+        rows = []
+        for _, source in targets.iterrows():
+            target_id = str(source.get("target_id", source.get("Target", "")))
+            legacy = source.copy()
+            legacy["Target"] = target_id
+            if "RA" not in legacy:
+                legacy["RA"] = source.get("ra_deg", source.get("RA_deg", float("nan")))
+            if "Dec" not in legacy:
+                legacy["Dec"] = source.get("dec_deg", source.get("Dec_deg", float("nan")))
+            try:
+                points = load_event_photometry(legacy, mop=client, cache_dir=cache_dir, refresh=refresh)
+                if points is not None and not points.empty:
+                    points = points.copy()
+                    points.insert(0, "target_id", target_id)
+                    points["provider"] = "mop"
+                    rows.append(points)
+            except Exception:
+                if errors == "raise":
+                    raise
+                if verbose:
+                    print(f"MOP photometry unavailable for {target_id}.", flush=True)
+        return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
     def visible_targets(self, *, observatory: str = "El Leoncito", start_date: str, end_date: str | None = None, **kwargs) -> pd.DataFrame:
         return self.load_targets(observatory=observatory, start_date=start_date, end_date=end_date, **kwargs)
@@ -159,15 +191,20 @@ def default_data_sources() -> DataSourceRegistry:
     registry.register(RubinHandle())
     from .sources.ogle import OGLEAdapter
     from .sources.opm import OPMAdapter
+    from .sources.bhtom import BHTOMAdapter
     ogle = OGLEAdapter()
     opm = OPMAdapter()
+    bhtom = BHTOMAdapter()
     registry.register(ProviderHandle("ogle", "survey", ogle.features, ogle.load_targets, metadata=ogle.describe()))
     registry.register(ProviderHandle("opm", "tom", opm.features, opm.load_targets, metadata=opm.describe()))
+    registry.register(ProviderHandle("bhtom", "tom", bhtom.features, metadata=bhtom.describe()))
     registry.get("ogle").photometry = ogle.photometry
     registry.get("ogle").epochs = ogle.epochs
     registry.get("opm").ranking = opm.ranking
+    registry.get("opm").photometry = opm.photometry
     registry.get("opm").login = opm.login
     registry.get("opm").private_targets = opm.private_targets
+    registry.get("bhtom").login = bhtom.login
     return registry
 
 

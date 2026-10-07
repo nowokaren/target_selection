@@ -14,8 +14,8 @@ import pandas as pd
 
 from target_selection.planning import (
     apply_magnitude_limit,
-    collect_provider_photometry,
-    load_provider_targets,
+    collect_photometry,
+    load_candidates,
     save_planning_pdf,
     save_priority_products,
     save_target_sky_map,
@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     output.mkdir(parents=True, exist_ok=True)
     providers = tuple(item.strip().lower() for item in args.providers.split(",") if item.strip())
 
-    targets = load_provider_targets(
+    targets = load_candidates(
         providers,
         start_date=args.start_date,
         end_date=args.end_date,
@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     targets.to_csv(output / "targets_loaded.csv", index=False)
 
     if args.with_photometry:
-        observations = collect_provider_photometry(
+        observations = collect_photometry(
             targets,
             providers=providers,
             cache_dir=output / "cache" / "photometry",

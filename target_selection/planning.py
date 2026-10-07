@@ -27,7 +27,7 @@ def _target_column(frame: pd.DataFrame) -> str:
     raise ValueError("Targets must contain target_id or Target.")
 
 
-def load_provider_targets(
+def load_candidates(
     providers: Sequence[str],
     *,
     start_date: str | None = None,
@@ -83,7 +83,7 @@ def load_provider_targets(
     return combined
 
 
-def collect_provider_photometry(
+def collect_photometry(
     targets: pd.DataFrame,
     *,
     providers: Sequence[str] = ("mop", "opm"),
@@ -129,6 +129,13 @@ def collect_provider_photometry(
     if not records:
         return pd.DataFrame(columns=["target_id", "provider", "epoch_hjd", "magnitude", "magnitude_err", "band"])
     return pd.concat(records, ignore_index=True, sort=False)
+
+
+# Compatibility aliases for notebooks created before the public names were
+# shortened.  New code should use ``load_candidates`` and
+# ``collect_photometry``.
+load_provider_targets = load_candidates
+collect_provider_photometry = collect_photometry
 
 
 def apply_magnitude_limit(targets: pd.DataFrame, maximum: float | None) -> pd.DataFrame:
