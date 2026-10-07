@@ -84,6 +84,17 @@ def _sort_targets_by_mag_now(targets: pd.DataFrame) -> pd.DataFrame:
         .drop(columns="_mag_now_sort")
         .reset_index(drop=True)
     )
+
+
+def _target_has_source(target: pd.Series, source: str) -> bool:
+    """Return whether a target is associated with a named data source."""
+    wanted = str(source).strip().casefold()
+    values = []
+    for column in ("source_providers", "input_sources", "provider", "target_source"):
+        value = target.get(column, "")
+        if pd.notna(value):
+            values.extend(str(value).replace(";", ",").split(","))
+    return wanted in {item.strip().casefold() for item in values if item.strip()}
 def _nominal_parameter(value: object) -> float:
     """Extract a numerical parameter value from MOP value±uncertainty text."""
     match = re.search(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", str(value))
@@ -428,8 +439,13 @@ def create_monitoring_lightcurve_plots(
         if path.exists() and not overwrite:
             continue
         figure, axis = plt.subplots(figsize=(10, 4.2))
+        mop_points = (
+            loader(target)
+            if "mop_photometry" in selected_layers and _target_has_source(target, "mop")
+            else pd.DataFrame()
+        )
         plot_monitoring_lightcurve(
-            target, loader(target) if "mop_photometry" in selected_layers else pd.DataFrame(),
+            target, mop_points,
             release_photometry=release_groups.get(name), lsst_coverage=coverage_groups.get(name),
             observatory_epochs=epoch_groups.get(name), observatory_photometry=local_groups.get(name),
             data_release=data_release, layers=selected_layers, mop_filters=mop_filters,
