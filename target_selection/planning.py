@@ -27,6 +27,30 @@ def _target_column(frame: pd.DataFrame) -> str:
     raise ValueError("Targets must contain target_id or Target.")
 
 
+def _merge_candidate_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    """Merge duplicate target rows without discarding source-specific metadata."""
+    work = frame.copy()
+    work["target_id"] = work["target_id"].astype(str)
+    rows = []
+    for target_id, group in work.groupby("target_id", sort=False):
+        merged = group.iloc[0].copy()
+        source_names = []
+        for value in group.get("provider", pd.Series(dtype=object)).dropna():
+            source_names.extend(str(value).split(","))
+        for value in group.get("input_sources", pd.Series(dtype=object)).dropna():
+            source_names.extend(str(value).split(","))
+        merged["source_providers"] = ",".join(sorted({item.strip().lower() for item in source_names if item.strip()}))
+        merged["input_sources"] = merged["source_providers"]
+        for column in group.columns:
+            values = group[column]
+            usable = values.loc[values.notna() & values.astype(str).str.strip().ne("")]
+            if pd.isna(merged.get(column)) or str(merged.get(column)).strip() in {"", "nan", "None"}:
+                if not usable.empty:
+                    merged[column] = usable.iloc[0]
+        rows.append(merged)
+    return pd.DataFrame(rows).reset_index(drop=True)
+
+
 def load_candidates(
     providers: Sequence[str],
     *,
@@ -79,7 +103,7 @@ def load_candidates(
         combined = combined.rename(columns={"Target": "target_id"})
     if "target_id" in combined:
         combined["target_id"] = combined["target_id"].astype(str)
-        combined = combined.drop_duplicates("target_id", keep="first").reset_index(drop=True)
+        combined = _merge_candidate_rows(combined)
     return combined
 
 
@@ -102,8 +126,16 @@ def collect_photometry(
         provider = data_source.get(name)
         if not hasattr(provider, "photometry"):
             continue
+        source_mask = pd.Series(True, index=work.index)
+        if "source_providers" in work:
+            source_mask = work["source_providers"].fillna("").astype(str).str.split(",").map(lambda values: name.lower() in {item.strip().lower() for item in values})
+        elif "provider" in work:
+            source_mask = work["provider"].astype(str).str.lower().eq(name.lower())
+        provider_targets = work.loc[source_mask].copy()
+        if provider_targets.empty:
+            continue
         try:
-            points = provider.photometry(work, cache_dir=Path(cache_dir) / name, errors="ignore", verbose=verbose)
+            points = provider.photometry(provider_targets, cache_dir=Path(cache_dir) / name, errors="ignore", verbose=verbose)
         except TypeError:
             points = provider.photometry(work)
         except Exception as exc:
