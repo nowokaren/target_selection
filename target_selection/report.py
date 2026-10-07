@@ -3,10 +3,90 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Sequence
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+import numpy as np
 import pandas as pd
 
 from .reporting import plot_collection_distributions, write_collection_summaries
 from .collection_access import build_collection_report_pdf
+
+
+def _normalize_observatory_photometry(frame: pd.DataFrame | None) -> pd.DataFrame | None:
+    """Adapt normalized provider observations to the monitoring-report schema."""
+    if frame is None or frame.empty:
+        return frame
+    result = frame.copy()
+    rename = {
+        "target_id": "Target",
+        "observation_time": "Timestamp",
+        "magnitude": "Magnitude",
+        "magnitude_err": "Error",
+        "band": "Filter",
+        "telescope": "Telescope",
+    }
+    for source, destination in rename.items():
+        if source in result and destination not in result:
+            result[destination] = result[source]
+    if "Timestamp" not in result and "epoch_hjd" in result:
+        hjd = pd.to_numeric(result["epoch_hjd"], errors="coerce")
+        result["Timestamp"] = pd.to_datetime(
+            hjd - 2400000.5, unit="D", origin="1858-11-17", errors="coerce"
+        )
+    if "Error" not in result:
+        result["Error"] = np.nan
+    if "Filter" not in result:
+        result["Filter"] = ""
+    if "provider" in result:
+        result["provider"] = result["provider"].astype(str).str.upper()
+    return result
+
+
+def create_lightcurve_plots(targets: pd.DataFrame, **kwargs):
+    """Create per-target light-curve PNGs from the public report API.
+
+    The report task historically uses the legacy ``Target`` column while the
+    current selection notebooks use ``target_id``.  Normalize that boundary
+    here so callers can pass either table convention.
+    """
+    from .tasks.reports import create_lightcurve_plots as _create_lightcurve_plots
+
+    data = targets.copy()
+    rename = {
+        "target_id": "Target",
+        "ra_deg": "RA_deg",
+        "dec_deg": "Dec_deg",
+        "magnitude_hsh": "mag_now",
+    }
+    for source, destination in rename.items():
+        if source in data and destination not in data:
+            data[destination] = data[source]
+    if "observatory_photometry" in kwargs:
+        kwargs["observatory_photometry"] = _normalize_observatory_photometry(kwargs["observatory_photometry"])
+    return _create_lightcurve_plots(data, **kwargs)
+
+
+def selection_summary_pdf(
+    visibility_images: Sequence[str | Path],
+    lightcurve_images: Sequence[str | Path],
+    output_path: str | Path,
+) -> Path:
+    """Combine selected-target visibility and light-curve PNGs into one PDF."""
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    image_paths = [Path(path) for path in (*visibility_images, *lightcurve_images)]
+    with PdfPages(output) as pdf:
+        for path in image_paths:
+            if not path.exists():
+                continue
+            image = plt.imread(path)
+            height, width = image.shape[:2]
+            figsize = (11.0, max(4.0, 11.0 * height / width))
+            figure, axis = plt.subplots(figsize=figsize)
+            axis.imshow(image)
+            axis.axis("off")
+            pdf.savefig(figure, bbox_inches="tight", pad_inches=0.05)
+            plt.close(figure)
+    return output
 
 
 def match_summary(coverage: pd.DataFrame, output_dir: str | Path, *, bands: Sequence[str] = tuple("ugrizy"), category_column: str = "category", category_label: str = "Category", name: str = "collection") -> pd.DataFrame:

@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     lightcurve_pngs = []
     if args.with_lightcurves and not selected.empty:
         from . import report
-        lightcurve_pngs = report.create_lightcurve_plots(selected, output_dir=output / "lightcurves", observatory_photometry=observations, layers=("mop_photometry", "opm_photometry"), observation_date=args.start_date, overwrite=True)
+        lightcurve_pngs = report.create_lightcurve_plots(selected, output_dir=output / "lightcurves", observatory_photometry=observations, layers=("mop_photometry", "opm_photometry", "ogle_photometry"), observation_date=args.start_date, overwrite=True)
     save_planning_pdf(output / "seasonal_observing_plan.pdf", sky_map=sky_map, table_images=(priority_png, visibility_png), visibility_images=visibility_plots, lightcurve_images=lightcurve_pngs, cutout_images=cutout_images)
     print(f"Seasonal plan saved to {output}")
     print(f"Targets loaded: {len(targets):,}; selected: {len(selected):,}")

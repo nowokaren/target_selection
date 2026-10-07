@@ -23,12 +23,16 @@ DEFAULT_MONITORING_LAYERS = (
     "release_photometry",
     "hsh",
     "js",
+    "opm_photometry",
+    "ogle_photometry",
 )
 VALID_MONITORING_LAYERS = frozenset(DEFAULT_MONITORING_LAYERS)
 PROVIDER_STYLES = {
     "LSST": {"color": "#6b7280", "alpha": 0.16, "label": "Rubin/LSST epochs"},
     "HSH": {"color": "#d97706", "alpha": 0.18, "label": "HSH images"},
     "JS": {"color": "#0f766e", "alpha": 0.18, "label": "JS images"},
+    "OPM": {"color": "#7c3aed", "alpha": 0.18, "label": "OPM photometry"},
+    "OGLE": {"color": "#2563eb", "alpha": 0.18, "label": "OGLE photometry"},
 }
 
 
@@ -149,29 +153,60 @@ def _provider_photometry_points(data: pd.DataFrame | None, provider: str) -> pd.
         return pd.DataFrame(columns=["Timestamp", "Magnitude", "Error", "Filter"])
     error_column = next((column for column in ("Error", "error", "mag_error") if column in points), None)
     filter_column = next((column for column in ("Filter", "filter", "band") if column in points), None)
+    telescope_column = next((column for column in ("Telescope", "telescope", "Source", "dataset_id") if column in points), None)
     normalized = pd.DataFrame({
         "Timestamp": timestamps,
         "Magnitude": pd.to_numeric(points[magnitude_column], errors="coerce"),
         "Error": pd.to_numeric(points[error_column], errors="coerce") if error_column else np.nan,
         "Filter": points[filter_column].astype(str) if filter_column else "",
+        "Telescope": points[telescope_column].astype(str) if telescope_column else "",
     })
     return normalized.dropna(subset=["Timestamp", "Magnitude"])
 
 
-def _plot_provider_photometry(ax, data: pd.DataFrame, provider: str) -> tuple[object | None, bool]:
-    """Plot local photometry for a provider and return a legend handle and state."""
+def _plot_provider_photometry(ax, data: pd.DataFrame, provider: str) -> tuple[list[object], bool]:
+    """Plot provider photometry with a distinct marker and color per band."""
     if data.empty:
-        return None, False
+        return [], False
     style = PROVIDER_STYLES[provider]
-    dates = mdates.date2num(data["Timestamp"].to_numpy(dtype="datetime64[us]"))
-    errors = data["Error"].to_numpy(float)
-    yerr = np.where(np.isfinite(errors) & (errors >= 0), errors, np.nan)
-    handle = ax.errorbar(
-        dates, data["Magnitude"].to_numpy(float), yerr=yerr, fmt="o", ms=3.0,
-        mfc="white", mec=style["color"], ecolor=style["color"], color=style["color"],
-        alpha=.9, label=f"{provider} photometry (N={len(data)})", zorder=4,
+    groups = sorted(
+        (str(telescope).strip().replace(" ", "_"), str(band).strip().replace(" ", "_"))
+        for telescope, band in data[["Telescope", "Filter"]].fillna("").drop_duplicates().itertuples(index=False, name=None)
     )
-    return handle, True
+    markers = ("o", "s", "^", "D", "v", "P", "X", "<", ">")
+    palette = plt.get_cmap("tab10")
+    handles = []
+    for index, (telescope, band) in enumerate(groups):
+        subset = data.loc[
+            data["Telescope"].fillna("").astype(str).eq(telescope)
+            & data["Filter"].fillna("").astype(str).eq(band)
+        ].copy()
+        if subset.empty:
+            continue
+        dates = mdates.date2num(subset["Timestamp"].to_numpy(dtype="datetime64[us]"))
+        errors = subset["Error"].to_numpy(float)
+        yerr = np.where(np.isfinite(errors) & (errors >= 0), errors, np.nan)
+        color = palette(index % 10) if len(groups) > 1 else style["color"]
+        telescope_label = telescope
+        if (
+            telescope_label.casefold() == band.casefold()
+            or band.casefold().startswith(f"{telescope_label.casefold()}_")
+        ):
+            telescope_label = ""
+        if provider in {"HSH", "JS"}:
+            label = f"{provider} photometry {band}"
+        else:
+            label = f"{provider} {telescope_label}_{band}" if telescope_label else f"{provider} {band}"
+        handle = ax.errorbar(
+            dates, subset["Magnitude"].to_numpy(float), yerr=yerr,
+            fmt=markers[index % len(markers)], ms=3.2,
+            mfc="white", mec=color, ecolor=color, color=color,
+            alpha=.9,
+            label=f"{label} (N={len(subset)})",
+            zorder=4,
+        )
+        handles.append(handle)
+    return handles, bool(handles)
 
 
 def plot_monitoring_lightcurve(
@@ -184,6 +219,9 @@ def plot_monitoring_lightcurve(
     observatory_photometry: pd.DataFrame | None = None,
     data_release: str = "DP2",
     layers: Iterable[str] | None = None,
+    mop_filters: Iterable[str] | str | None = None,
+    observation_date: object | None = None,
+    observation_horizon_days: float = 7.0,
     title: str | None = None,
     show_legend: bool = True,
     future_xmax: float | None = None,
@@ -194,11 +232,23 @@ def plot_monitoring_lightcurve(
     selected_layers = normalize_monitoring_layers(layers)
     if ax is None:
         _, ax = plt.subplots(figsize=(10, 3.6))
+    observation_x = None
+    if observation_date is not None:
+        observation_timestamp = pd.Timestamp(observation_date)
+        observation_x = mdates.date2num(observation_timestamp.to_pydatetime())
+        future_xmax = mdates.date2num((observation_timestamp + pd.Timedelta(days=observation_horizon_days)).to_pydatetime())
     name = str(target["Target"])
     photometry = photometry if photometry is not None else pd.DataFrame()
     handles: list = []
     has_photometry = False
-    filters = select_lightcurve_filters(photometry) if "mop_photometry" in selected_layers else []
+    if "mop_photometry" not in selected_layers:
+        filters = []
+    elif mop_filters == "all":
+        filters = sorted(str(value) for value in photometry.get("Filter", pd.Series(dtype=str)).dropna().unique())
+    elif mop_filters is None:
+        filters = select_lightcurve_filters(photometry)
+    else:
+        filters = list(mop_filters)
     for filter_name in filters:
         data = prepare_lightcurve_data(photometry, filter_name)
         if data.empty:
@@ -260,13 +310,13 @@ def plot_monitoring_lightcurve(
             })
 
     all_epochs = observatory_epochs if observatory_epochs is not None else pd.DataFrame()
-    for provider, layer in (("HSH", "hsh"), ("JS", "js")):
+    for provider, layer in (("HSH", "hsh"), ("JS", "js"), ("OPM", "opm_photometry"), ("OGLE", "ogle_photometry")):
         if layer not in selected_layers:
             continue
         local_points = _provider_photometry_points(observatory_photometry, provider)
-        handle, plotted = _plot_provider_photometry(ax, local_points, provider)
+        provider_handles, plotted = _plot_provider_photometry(ax, local_points, provider)
         if plotted:
-            handles.append(handle)
+            handles.extend(provider_handles)
             has_photometry = True
             continue
         subset = all_epochs.loc[
@@ -318,6 +368,11 @@ def plot_monitoring_lightcurve(
     ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
     ax.set_xlabel("Date")
     ax.grid(alpha=.22, zorder=1)
+    if observation_x is not None:
+        ax.axvline(observation_x, color="black", linestyle="--", linewidth=1.0, alpha=.75, label="Observation date")
+    minimum_xmin = mdates.date2num(pd.Timestamp("2024-01-01").to_pydatetime())
+    current_xmin, current_xmax = ax.get_xlim()
+    ax.set_xlim(left=max(current_xmin, minimum_xmin))
     if enforce_future_horizon:
         ax.set_xlim(right=_monitoring_future_xmax() if future_xmax is None else future_xmax)
     return ax
@@ -335,6 +390,9 @@ def create_monitoring_lightcurve_plots(
     observatory_photometry: pd.DataFrame | None = None,
     data_release: str = "DP2",
     layers: Iterable[str] | None = None,
+    mop_filters: Iterable[str] | str | None = None,
+    observation_date: object | None = None,
+    observation_horizon_days: float = 7.0,
     overwrite: bool = False,
     verbose: bool = True,
 ) -> list[Path]:
@@ -356,7 +414,9 @@ def create_monitoring_lightcurve_plots(
     if verbose:
         print(f"[reports] Updating {len(records)} light-curve PNG(s).", flush=True)
     try:
-        from tqdm.auto import tqdm
+        # Use the terminal-compatible progress bar. The notebook widget can
+        # outlive the kernel model and produce a misleading display error.
+        from tqdm import tqdm
         iterator = tqdm(records.iterrows(), total=len(records), desc="Light curves", unit="target")
     except ImportError:
         iterator = records.iterrows()
@@ -372,7 +432,8 @@ def create_monitoring_lightcurve_plots(
             target, loader(target) if "mop_photometry" in selected_layers else pd.DataFrame(),
             release_photometry=release_groups.get(name), lsst_coverage=coverage_groups.get(name),
             observatory_epochs=epoch_groups.get(name), observatory_photometry=local_groups.get(name),
-            data_release=data_release, layers=selected_layers, ax=axis,
+            data_release=data_release, layers=selected_layers, mop_filters=mop_filters,
+            observation_date=observation_date, observation_horizon_days=observation_horizon_days, ax=axis,
         )
         figure.tight_layout()
         figure.savefig(path, dpi=150, bbox_inches="tight")
@@ -394,6 +455,9 @@ def create_monitoring_report(
     observatory_photometry: pd.DataFrame | None = None,
     data_release: str = "DP2",
     layers: Iterable[str] | None = None,
+    mop_filters: Iterable[str] | str | None = None,
+    observation_date: object | None = None,
+    observation_horizon_days: float = 7.0,
     plots_per_page: int = 3,
     photometry_loader: Callable[[pd.Series], pd.DataFrame] | None = None,
     created_at: object | None = None,
@@ -450,6 +514,9 @@ def create_monitoring_report(
                     "observatory_photometry": photometry_groups.get(name),
                     "data_release": data_release,
                     "layers": selected_layers,
+                    "mop_filters": mop_filters,
+                    "observation_date": observation_date,
+                    "observation_horizon_days": observation_horizon_days,
                 }
                 plot_monitoring_lightcurve(target, target_photometry, ax=main_axis, future_xmax=future_xmax, **plot_kwargs)
                 limits = _microlensing_zoom_limits(target)

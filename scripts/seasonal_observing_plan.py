@@ -100,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
             selected,
             output_dir=output / "lightcurves",
             observatory_photometry=observations,
-            layers=("mop_photometry", "opm_photometry"),
+            layers=("mop_photometry", "opm_photometry", "ogle_photometry"),
             observation_date=args.start_date,
             overwrite=True,
         )
