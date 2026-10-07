@@ -51,6 +51,16 @@ def _merge_candidate_rows(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).reset_index(drop=True)
 
 
+def _has_mop_record(row: pd.Series) -> bool:
+    """Return whether a combined target has an actual MOP event record."""
+    for column in ("mop_link", "mop_target_id", "mop_target_name"):
+        value = row.get(column, "")
+        if pd.notna(value) and str(value).strip() not in {"", "nan", "None", "<NA>"}:
+            return True
+    status = str(row.get("mop_parameters_status", "")).strip().casefold()
+    return status in {"available", "ok", "success", "loaded"}
+
+
 def load_candidates(
     providers: Sequence[str],
     *,
@@ -131,6 +141,8 @@ def collect_photometry(
             source_mask = work["source_providers"].fillna("").astype(str).str.split(",").map(lambda values: name.lower() in {item.strip().lower() for item in values})
         elif "provider" in work:
             source_mask = work["provider"].astype(str).str.lower().eq(name.lower())
+        if name.lower() == "mop":
+            source_mask &= work.apply(_has_mop_record, axis=1)
         provider_targets = work.loc[source_mask].copy()
         if provider_targets.empty:
             continue
