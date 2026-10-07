@@ -39,7 +39,7 @@ def _valid_photometry(data: pd.DataFrame) -> bool:
     return bool((timestamp.notna() & magnitude.notna()).any())
 
 
-def load_event_photometry(target, *, mop, cache_dir, refresh=False, legacy_cache_dir=None):
+def load_event_photometry(target, *, mop, cache_dir, refresh=False, legacy_cache_dir=None, verbose=True):
     """Fetch MOP photometry by name, with a positional fallback and CSV cache.
 
     ``legacy_cache_dir`` lets prior runs using the old ``photometry`` directory
@@ -54,13 +54,15 @@ def load_event_photometry(target, *, mop, cache_dir, refresh=False, legacy_cache
         try:
             data = normalize_photometry_provenance(pd.read_csv(path, parse_dates=["Timestamp"]))
         except (OSError, ValueError) as exc:
-            print(f"Photometry skipped for {target_name}: invalid cache ({exc})")
+            if verbose:
+                print(f"Photometry skipped for {target_name}: invalid cache ({exc})")
             path.unlink(missing_ok=True)
             data = pd.DataFrame()
         if _valid_photometry(data):
             data.to_csv(path, index=False)
             return data
-        print(f"Photometry skipped for {target_name}: cached file has no usable measurements")
+        if verbose:
+            print(f"Photometry skipped for {target_name}: cached file has no usable measurements")
         path.unlink(missing_ok=True)
     if legacy_cache_dir is not None and not refresh:
         legacy_path = Path(legacy_cache_dir) / path.name
@@ -69,11 +71,13 @@ def load_event_photometry(target, *, mop, cache_dir, refresh=False, legacy_cache
             if _valid_photometry(data):
                 data.to_csv(path, index=False)
                 return data
-            print(f"Photometry skipped for {target_name}: legacy file has no usable measurements")
+            if verbose:
+                print(f"Photometry skipped for {target_name}: legacy file has no usable measurements")
     if mop is None:
         result = pd.DataFrame()
         result.attrs["error"] = "No MOP client was provided and no cached photometry was available."
-        print(f"Photometry skipped for {target_name}: no MOP client or cached photometry")
+        if verbose:
+            print(f"Photometry skipped for {target_name}: no MOP client or cached photometry")
         return result
     try:
         data = normalize_photometry_provenance(mop.photometry(target_name), provider="MOP")
@@ -82,10 +86,17 @@ def load_event_photometry(target, *, mop, cache_dir, refresh=False, legacy_cache
             return data
         raise ValueError("MOP returned no usable photometric measurements")
     except Exception as name_error:
-        if is_row and target.get("RA") is not None and target.get("Dec") is not None:
+        ra_value = pd.to_numeric(target.get("RA"), errors="coerce") if is_row else np.nan
+        dec_value = pd.to_numeric(target.get("Dec"), errors="coerce") if is_row else np.nan
+        valid_coordinates = (
+            pd.notna(ra_value) and pd.notna(dec_value)
+            and np.isfinite(float(ra_value)) and np.isfinite(float(dec_value))
+            and 0.0 <= float(ra_value) < 360.0 and -90.0 <= float(dec_value) <= 90.0
+        )
+        if is_row and valid_coordinates:
             try:
                 data = normalize_photometry_provenance(
-                    mop.photometry(ra=target["RA"], dec=target["Dec"]), provider="MOP"
+                    mop.photometry(ra=float(ra_value), dec=float(dec_value)), provider="MOP"
                 )
                 if _valid_photometry(data):
                     data.to_csv(path, index=False)
@@ -96,7 +107,8 @@ def load_event_photometry(target, *, mop, cache_dir, refresh=False, legacy_cache
         result = pd.DataFrame()
         path.unlink(missing_ok=True)
         result.attrs["error"] = str(name_error)
-        print(f"Photometry skipped for {target_name}: {name_error}")
+        if verbose and "no target found" not in str(name_error).casefold():
+            print(f"Photometry skipped for {target_name}: {name_error}")
 
         return result
 

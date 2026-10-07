@@ -419,7 +419,7 @@ def create_monitoring_lightcurve_plots(
                     if observatory_epochs is not None and not observatory_epochs.empty and "Target" in observatory_epochs else {})
     local_groups = ({name: group for name, group in observatory_photometry.groupby("Target", sort=False)}
                     if observatory_photometry is not None and not observatory_photometry.empty and "Target" in observatory_photometry else {})
-    loader = lambda target: load_event_photometry(target, mop=mop, cache_dir=mop_photometry_dir)
+    loader = lambda target: load_event_photometry(target, mop=mop, cache_dir=mop_photometry_dir, verbose=verbose)
     paths: list[Path] = []
     records = _sort_targets_by_mag_now(targets)
     if verbose:
@@ -508,7 +508,7 @@ def create_monitoring_report(
         if release_photometry is not None and not release_photometry.empty and "Target" in release_photometry else {}
     )
     loader = photometry_loader or (
-        lambda target: load_event_photometry(target, mop=mop, cache_dir=mop_photometry_dir)
+        lambda target: load_event_photometry(target, mop=mop, cache_dir=mop_photometry_dir, verbose=False)
     )
     pages = 0
     with PdfPages(output_path) as pdf:

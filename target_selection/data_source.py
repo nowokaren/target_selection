@@ -93,7 +93,7 @@ class MOPHandle(ProviderHandle):
             if "Dec" not in legacy:
                 legacy["Dec"] = source.get("dec_deg", source.get("Dec_deg", float("nan")))
             try:
-                points = load_event_photometry(legacy, mop=client, cache_dir=cache_dir, refresh=refresh)
+                points = load_event_photometry(legacy, mop=client, cache_dir=cache_dir, refresh=refresh, verbose=verbose)
                 if points is not None and not points.empty:
                     points = points.copy()
                     points.insert(0, "target_id", target_id)
