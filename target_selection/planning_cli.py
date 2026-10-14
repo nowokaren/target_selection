@@ -7,17 +7,18 @@ from pathlib import Path
 import pandas as pd
 
 from .planning import (
-    apply_magnitude_limit, collect_photometry, load_candidates,
+    add_latest_magnitude, add_ogle_event_parameters, apply_magnitude_limit, collect_photometry, load_candidates,
     save_planning_pdf, save_priority_products, save_target_sky_map,
     save_visibility_products,
 )
+from .prioritization import SCHEDULABLE_CATEGORIES, evaluate_priority
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build a seasonal target-selection report.")
     parser.add_argument("--start-date", required=True)
     parser.add_argument("--end-date", required=True)
-    parser.add_argument("--providers", default="mop,opm")
+    parser.add_argument("--providers", default=None, help="Comma-separated TOM names; default: all registered TOMs.")
     parser.add_argument("--observatory", default="El Leoncito")
     parser.add_argument("--output-dir", default="outputs/seasonal_plan")
     parser.add_argument("--magnitude-max", type=float, default=None)
@@ -29,22 +30,33 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
-    providers = tuple(item.strip().lower() for item in args.providers.split(",") if item.strip())
+    providers = None if args.providers is None else tuple(item.strip().lower() for item in args.providers.split(",") if item.strip())
     targets = load_candidates(providers, start_date=args.start_date, end_date=args.end_date, include_photometry=args.with_photometry, cache_dir=output / "cache")
     if targets.empty:
         print("No targets were loaded.")
         return 1
+    targets = add_ogle_event_parameters(targets)
     targets.to_csv(output / "targets_loaded.csv", index=False)
     observations = collect_photometry(targets, providers=providers, cache_dir=output / "cache" / "photometry") if args.with_photometry else pd.DataFrame()
     if args.with_photometry:
         observations.to_csv(output / "observations.csv", index=False)
+        targets = add_latest_magnitude(targets, observations)
+        targets.to_csv(output / "targets_loaded.csv", index=False)
     candidates = apply_magnitude_limit(targets, args.magnitude_max)
     candidates.to_csv(output / "targets_after_magnitude.csv", index=False)
-    _, visibility_summary, visibility_plots, visibility_png = save_visibility_products(candidates, output / "visibility", start_date=args.start_date, end_date=args.end_date, observatory=args.observatory, minimum_altitude_deg=args.minimum_altitude_deg, minimum_observable_minutes=args.minimum_visible_minutes)
-    selected_ids = set(visibility_summary.loc[visibility_summary["n_visible_nights"].gt(0), "target_id"])
-    selected = candidates.loc[candidates["target_id"].isin(selected_ids)].copy()
+    _, visibility_summary, visibility_plots, visibility_png = save_visibility_products(targets, output / "visibility", start_date=args.start_date, end_date=args.end_date, observatory=args.observatory, minimum_altitude_deg=args.minimum_altitude_deg, minimum_observable_minutes=args.minimum_visible_minutes)
+    priority = evaluate_priority(targets, observations, visibility_summary, as_of=args.start_date, output_dir=output / "tables")
+    _, priority_png = save_priority_products(priority, output / "tables", name="priority_assessment", title="Evidence-based priority assessment", subtitle="Scientific categories come from the shared evaluator; visibility and magnitude are feasibility evidence.", write_csv=False)
+    feasible = candidates.merge(
+        priority[["target_id", "priority_category", "n_visible_nights", "priority_rank"]],
+        on="target_id", how="left",
+    )
+    selected = feasible.loc[
+        feasible["priority_category"].isin(SCHEDULABLE_CATEGORIES)
+        & pd.to_numeric(feasible["n_visible_nights"], errors="coerce").fillna(0).gt(0)
+    ]
+    selected = selected.sort_values("priority_rank").drop(columns=["priority_rank", "n_visible_nights"])
     selected.to_csv(output / "selected_targets.csv", index=False)
-    _, priority_png = save_priority_products(visibility_summary.sort_values(["n_visible_nights", "best_observable_minutes"], ascending=False), output / "tables", name="priority_table", title="Observing priority summary", subtitle="Targets passing the configured magnitude and local-visibility criteria.")
     sky_map = save_target_sky_map(selected, output / "sky_map.png", title="Selected targets")
     cutout_images = []
     if args.with_lsst_cutouts and not selected.empty:

@@ -8,7 +8,7 @@ from typing import Sequence
 import pandas as pd
 
 from target_selection.tasks.visibility import evaluate_visibility
-from visibility_plotter import compile_visibility_plot_pages, plot_selected_visibility, summarize_visibility_selection
+from target_selection.visibility_plotter import compile_visibility_plot_pages, plot_selected_visibility, summarize_visibility_selection
 
 ALIASES = {
     "Target": ("Target", "target", "target_id", "object", "name"),

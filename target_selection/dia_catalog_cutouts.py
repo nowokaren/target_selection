@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Iterable
 import numpy as np
 
 if TYPE_CHECKING:
-    from data_release_config import DataReleaseConfig
+    from target_selection.data_release_config import DataReleaseConfig
 
 
 def save_dia_match_cutout(

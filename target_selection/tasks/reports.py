@@ -7,8 +7,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from data_release_config import get_data_release
-from mop_photometry import load_event_photometry
+from target_selection.data_release_config import get_data_release
+from target_selection.mop_photometry import load_event_photometry
 from target_selection.sources.lsst import create_butler, create_tap_service
 
 
@@ -34,7 +34,7 @@ def create_target_report(
     verbose: bool = True,
 ) -> Path:
     """Task: create or update one target dashboard PNG."""
-    from target_report import plot_target
+    from target_selection.target_report import plot_target
     from target_selection.run_paths import safe_name
 
     release = get_data_release(data_release)
@@ -128,15 +128,26 @@ def create_lightcurve_plots(
     mop=None, release_photometry: pd.DataFrame | None = None,
     coverage: pd.DataFrame | None = None, observatory_epochs: pd.DataFrame | None = None,
     observatory_photometry: pd.DataFrame | None = None, data_release: str = "DP2",
-    layers=None, overwrite: bool = False, verbose: bool = True,
+    layers=None, mop_filters=None, observation_date=None, observation_horizon_days: float = 7.0,
+    overwrite: bool = False, verbose: bool = True,
 ) -> list[Path]:
     """Create persistent per-target light-curve PNGs in a general directory."""
+    requested_layers = {str(layer).lower() for layer in (layers or ())}
+    if mop is None and (not requested_layers or "mop_photometry" in requested_layers):
+        try:
+            from ..sources.mop import create_client
+            mop = create_client()
+        except Exception as exc:
+            if verbose:
+                print(f"[reports] MOP photometry unavailable: {exc}", flush=True)
     from monitoring_report import create_monitoring_lightcurve_plots
     return create_monitoring_lightcurve_plots(
         targets, output_dir, mop=mop, mop_photometry_dir=mop_photometry_dir,
         release_photometry=release_photometry, lsst_coverage=coverage,
         observatory_epochs=observatory_epochs, observatory_photometry=observatory_photometry,
-        data_release=data_release, layers=layers, overwrite=overwrite, verbose=verbose,
+        data_release=data_release, layers=layers, mop_filters=mop_filters,
+        observation_date=observation_date, observation_horizon_days=observation_horizon_days,
+        overwrite=overwrite, verbose=verbose,
     )
 
 def create_lightcurves_report(
@@ -148,6 +159,9 @@ def create_lightcurves_report(
     coverage: pd.DataFrame | None = None,
     data_release: str = "DP2",
     layers=None,
+    mop_filters=None,
+    observation_date=None,
+    observation_horizon_days: float = 7.0,
     plots_per_page: int = 3,
     verbose: bool = True,
 ) -> Path:
@@ -167,6 +181,9 @@ def create_lightcurves_report(
         lsst_coverage=coverage if coverage is not None else pd.DataFrame(),
         data_release=data_release,
         layers=layers,
+        mop_filters=mop_filters,
+        observation_date=observation_date,
+        observation_horizon_days=observation_horizon_days,
         plots_per_page=plots_per_page,
     )
     if verbose:

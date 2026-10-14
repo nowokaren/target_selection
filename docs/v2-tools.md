@@ -14,7 +14,7 @@ This is a compact inventory of the recommended public tools. Private helpers and
 | `visibility` | `evaluate`, `plots`, `sequence` | Evaluate and visualize observability |
 | `CollectionContext` | `get_visit_coverage`, `get_coadd_coverage`, `get_property_map_values`, `get_image` | Match targets and retrieve collection products |
 | `report` | `match_summary`, `property_distributions`, `sky_maps`, `main` | Write analysis tables, plots and PDF reports |
-| `prioritization` | `apply_magnitude_limits`, `summarize_photometry`, `build_priority_table` | Reusable microlensing selection and ranking logic |
+| `prioritization` | `evaluate_priority`, `PriorityConfig` | One evidence-based microlensing classification and within-category ordering method |
 
 ## Source and collection access
 

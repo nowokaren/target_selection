@@ -1,8 +1,9 @@
 # Typical seasonal HSH/JS workflow
 
 This is the recurring workflow to use when a new observing season approaches.
-The operational notebook is
-`notebooks/v2/02_seasonal_visibility_selection.ipynb` (ver también [Usage notebooks](usage-notebooks.md)).
+Use `notebooks/v2/02_seasonal_visibility_selection.ipynb` for visibility alone.
+For the complete HSH/JS priority assessment and seasonal plan, use
+`notebooks/v2/11_seasonal_observing_plan.ipynb` (see [Usage notebooks](usage-notebooks.md)).
 
 ## Flow
 
@@ -49,6 +50,18 @@ season_targets = visibility.loc[
 The next survey-specific step should add the HSH/JS observation inventory and
 photometry through an adapter or `add_data`. It should not duplicate the
 visibility calculation or Rubin matching logic.
+
+After TOM and survey photometry is collected, call the single
+`target_selection.prioritization.evaluate_priority` function with the target
+table, normalized observations, and visibility summary. It returns one
+category/rank assessment per candidate; visibility and magnitude remain
+separate schedule-feasibility evidence. The [priority contract](contracts/priority.md)
+defines categories, metrics and output fields.
+
+Before assessment, `add_ogle_event_parameters` fills missing OGLE `t0`, `tE`,
+and `u0` values from the OGLE EWS event table while preserving parameters
+already supplied by a TOM. Rows without usable model parameters remain in the
+table with `event_stage=unknown` and an explicit review reason.
 
 ## Outputs to preserve
 

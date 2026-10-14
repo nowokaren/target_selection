@@ -1,0 +1,31 @@
+Estuve comparando los 6.444 targets de MOP con DP2 usando LSDB/HATS, con un radio de 1 arcsec.
+
+Probé dos matches distintos:
+
+• Contra `Object`, para ver si el target aparece como fuente en un coadd: encontré 112.
+
+• Contra `DiaObject`, para buscar candidatos variables/transitorios: encontré 504. Este segundo caso es el más parecido al flujo que veníamos usando: MOP → DiaObject → ForcedSourceOnDiaObject.
+
+También combiné esos resultados con la cobertura DP2 que ya teníamos: visitas registradas, coadds, métricas válidas, píxeles válidos y coadds completamente válidos.
+
+El flujo de cobertura, a nivel de datos, fue:
+
+• TAP sobre `dp02_dc2_catalogs.CcdVisit`: busqué por posición qué filas de visita+detector cubren cada target, usando el centro y las cuatro esquinas del detector. De ahí salen los conteos de imágenes por banda y `n_images_total`.
+
+• Butler `query_datasets(...)`: busqué si existe un dataset de coadd que cubra cada RA/Dec. Esto sólo verifica que el coadd esté registrado; no busca un `Object`.
+
+• Butler sobre los mapas de propiedades: evalué en la posición del target `maglim`, PSF, tiempo de exposición y ruido de cielo, y marqué si las métricas están disponibles.
+
+• Butler `query_datasets(...)` + `butler.get(...)`: recuperé el coadd, transformé RA/Dec a píxel con el WCS y revisé los píxeles del cutout de 20 arcsec por lado. `has_valid_pixels` significa que hay al menos un píxel finito/utilizable.
+
+Este flujo no busca fuentes cercanas: sólo verifica cobertura de imágenes, existencia de coadds, disponibilidad de métricas y píxeles utilizables. Los matches con `Object` y `DiaObject` se hacen después, por separado, con LSDB/HATS.
+
+Los números principales son:
+
+• 5.184 targets con al menos una visita registrada;
+• 4.731 con algún coadd;
+• 4.681 con al menos un coadd completamente válido;
+• 112 con Object;
+• 504 con DiaObject.
+
+Armé el UpSet de la figura para ordenar las combinaciones por completitud: primero los targets que tienen todo y después los que van perdiendo una, dos, tres condiciones, etc.

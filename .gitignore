@@ -14,4 +14,7 @@ LaStBeRu_data/
 
 site/
 
+# Local survey catalogs and downloaded inputs; preserve locally, keep out of Git.
+/data/
+
 js_data/

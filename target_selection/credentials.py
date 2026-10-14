@@ -18,7 +18,10 @@ from typing import Literal
 
 Backend = Literal["auto", "keyring", "env", "netrc", "prompt"]
 KEYRING_SERVICE = "target-selection"
-NETRC_HOSTS = {"opm": "lensingtom.zah.uni-heidelberg.de"}
+NETRC_HOSTS = {
+    "opm": "lensingtom.zah.uni-heidelberg.de",
+    "bhtom": "bh-tom2.astrouw.edu.pl",
+}
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,13 @@ def _env_names(provider: str) -> tuple[str, str]:
 
 def _netrc_machine(provider: str) -> str:
     return NETRC_HOSTS.get(str(provider).strip().lower(), str(provider).strip().lower())
+
+
+def _netrc_quote(value: str) -> str:
+    """Quote a netrc token without losing spaces or backslashes."""
+    if "\n" in value or "\r" in value:
+        raise ValueError("Credentials cannot contain line breaks in netrc.")
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _keyring_module():
@@ -134,8 +144,12 @@ def set_credentials(provider: str, username: str, password: str, *, backend: Lit
             ) from exc
         return
     path = Path(netrc_path).expanduser() if netrc_path else Path.home() / ".netrc"
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(f"\nmachine {_netrc_machine(provider)}\nlogin {username}\npassword {password}\n")
+    descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    with os.fdopen(descriptor, "a", encoding="utf-8") as handle:
+        handle.write(
+            f"\nmachine {_netrc_quote(_netrc_machine(provider))}\n"
+            f"login {_netrc_quote(username)}\npassword {_netrc_quote(password)}\n"
+        )
     os.chmod(path, 0o600)
 
 

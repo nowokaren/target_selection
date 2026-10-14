@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 
-from data_release_config import DataReleaseConfig, get_data_release
+from target_selection.data_release_config import DataReleaseConfig, get_data_release
 
 
 def safe_name(value: object) -> str:

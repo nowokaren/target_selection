@@ -5,6 +5,7 @@ active Python package. Generated run outputs, notebook checkpoints, Python
 bytecode, test caches, and the MkDocs `site/` directory are intentionally not
 archived or versioned; they can be regenerated and are ignored by Git.
 
-The active source layout is documented in `docs/architecture.md`. The root
-`target_selection_pipeline.py` file remains as a compatibility shim, while the
-implementation is in `target_selection/backend.py`.
+The active source layout is documented in `docs/architecture.md`. Reusable
+application modules live in `target_selection/`; root-level modules with the
+same public names are compatibility imports for existing notebooks and scripts.
+The historical MOP–DP2 helper is kept under `analyses/mop_dp2/archive/`.

@@ -31,7 +31,7 @@ def _expand_target_dates(targets: pd.DataFrame, start_date: str, end_date: str) 
         ignore_index=True, sort=False,
     ) if len(base) else base.assign(observation_date=pd.Series(dtype=str))
 
-from visibility_plotter import (
+from target_selection.visibility_plotter import (
     build_visibility_selection,
     plot_visibility_sequence,
     save_nightly_visibility_plots,

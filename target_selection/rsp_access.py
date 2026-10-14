@@ -12,7 +12,7 @@ from typing import Any, Sequence
 
 import pandas as pd
 
-from data_release_config import DataReleaseConfig, get_data_release
+from target_selection.data_release_config import DataReleaseConfig, get_data_release
 
 
 def _normalise_positions(positions: pd.DataFrame) -> pd.DataFrame:

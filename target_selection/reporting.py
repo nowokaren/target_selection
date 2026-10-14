@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Sequence
 import json
+import textwrap
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -43,6 +44,18 @@ def _style_table(table, fontsize: float) -> None:
             cell.set_linewidth(0.8)
 
 
+def _wrapped_headers(columns: Sequence[object], width: int = 16) -> list[str]:
+    """Wrap long table headers so they remain readable."""
+    return [textwrap.fill(str(column).replace("_", " "), width=width) for column in columns]
+
+
+def _enlarge_header_row(table, factor: float = 1.7) -> None:
+    """Give wrapped column headers enough vertical room."""
+    for (row, _column), cell in table.get_celld().items():
+        if row == 0:
+            cell.set_height(cell.get_height() * factor)
+
+
 def write_table_png(
     frame: pd.DataFrame,
     output_path: str | Path,
@@ -78,19 +91,20 @@ def write_table_png(
     height = max(2.2, min(32.0, 1.1 + 0.34 * (n_rows + 1)))
     fig, axis = plt.subplots(figsize=(width, height), dpi=dpi)
     axis.axis("off")
-    top = 0.90 if subtitle else 0.94
+    top = 0.89 if subtitle else 0.91
     table = axis.table(
         cellText=display.values,
-        colLabels=[str(column) for column in display.columns],
+        colLabels=_wrapped_headers(display.columns),
         cellLoc="center",
         colLoc="center",
         loc="center",
         bbox=[0, 0, 1, top],
     )
     _style_table(table, fontsize)
-    axis.set_title(title, fontsize=11, fontweight="bold", pad=2)
+    _enlarge_header_row(table)
+    axis.set_title(title, fontsize=11, fontweight="bold", y=1.04, pad=0)
     if subtitle:
-        fig.text(0.5, 0.955, subtitle, ha="center", va="top", fontsize=7.5)
+        fig.text(0.5, 0.965, subtitle, ha="center", va="top", fontsize=7.5)
     fig.savefig(output, dpi=dpi, bbox_inches="tight", pad_inches=0.03)
     plt.close(fig)
     return output
@@ -176,11 +190,12 @@ def write_collection_summaries(
 
     shown_band = band_summary.rename(columns={"band": "Band", "targets_with_visits": "Targets with visits", "coadds_found": "Coadds found", "coadds_with_valid_metrics": "Coadds with valid metrics", "coadds_with_valid_pixels": "Coadds with valid pixels", "coadds_with_valid_coadd": "Valid coadds"}).copy()
     for column in shown_band.columns[1:]: shown_band[column] = shown_band[column].map(lambda value: f"{int(value):,}")
-    fig, axis = plt.subplots(figsize=(8.5, 2.4), dpi=220)
+    fig, axis = plt.subplots(figsize=(8.5, 2.8), dpi=220)
     axis.axis("off")
-    table = axis.table(cellText=shown_band.values, colLabels=list(shown_band.columns), cellLoc="center", loc="center", bbox=[0, 0, 1, 0.86])
+    table = axis.table(cellText=shown_band.values, colLabels=_wrapped_headers(shown_band.columns), cellLoc="center", loc="center", bbox=[0, 0, 1, 0.86])
     _style_table(table, 7)
-    axis.set_title(f"{name}: coverage by band", fontsize=9, fontweight="bold", pad=2)
+    _enlarge_header_row(table)
+    axis.set_title(f"{name}: coverage by band", fontsize=9, fontweight="bold", y=1.04, pad=0)
     fig.savefig(out / "summary_by_band.png", dpi=220, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
 
@@ -191,11 +206,12 @@ def write_collection_summaries(
     shown = summary.rename(columns={"category": category_label, "type": "Type", "total": "Total"}).copy()
     shown["Type"] = shown["Type"].map({"visits": "Visits", "coadds_found": "Coadds found", "coadds_with_valid_metrics": "Coadds with\nvalid metrics", "coadds_with_valid_pixels": "Coadds with\nvalid pixels", "coadds_with_valid_coadd": "Valid coadds"}).fillna(shown["Type"])
     for column in shown.columns[2:]: shown[column] = shown[column].map(lambda value: f"{int(value):,}")
-    fig, axis = plt.subplots(figsize=(9.5, 5.0), dpi=220)
+    fig, axis = plt.subplots(figsize=(9.5, 5.5), dpi=220)
     axis.axis("off")
-    table = axis.table(cellText=shown.values, colLabels=list(shown.columns), cellLoc="center", loc="center", bbox=[0, 0.015, 1, 0.91])
+    table = axis.table(cellText=shown.values, colLabels=_wrapped_headers(shown.columns), cellLoc="center", loc="center", bbox=[0, 0.015, 1, 0.89])
     _style_table(table, 7.0)
-    axis.set_title(f"{name}: visits and coadds by {category_label}", fontsize=10, fontweight="bold", y=0.975, pad=0)
+    _enlarge_header_row(table)
+    axis.set_title(f"{name}: visits and coadds by {category_label}", fontsize=10, fontweight="bold", y=1.04, pad=0)
     fig.savefig(out / f"summary_by_{summary_stem}.png", dpi=220, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
     return summary

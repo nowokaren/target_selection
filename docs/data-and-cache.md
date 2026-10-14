@@ -4,6 +4,15 @@ The project separates persistent scientific data from run-specific products.
 This avoids copying the same photometry and observations into every run while
 keeping each result reproducible.
 
+## Local source files
+
+Small local catalogs and observatory inventories used as inputs are kept under
+`data/`, grouped by source (`hsh_data/`, `js_data/`, `mop_data/`, and
+`LaStBeRu_data/`). The directory is ignored by Git so private or changing input
+files stay local. Jupyter checkpoint copies are removed; notebooks should read
+the canonical file in the source directory. Downloaded and refreshable provider
+caches belong under `outputs/`, as listed below.
+
 ## Persistent registry
 
 The default registry is:

@@ -17,7 +17,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
-from data_release_config import DataReleaseConfig, get_data_release
+from target_selection.data_release_config import DataReleaseConfig, get_data_release
 
 try:  # Python 3.11+
     import tomllib
@@ -860,6 +860,12 @@ def rank_cutout_candidates(
     output = catalog.copy()
     normalized_grades = tuple(str(grade).upper() for grade in grades)
     grade_rank = {grade: index for index, grade in enumerate(normalized_grades)}
+    # Coordinate catalogs such as MOP do not necessarily have a vetting grade.
+    # They remain valid for coadd/coverage analysis but are not cutout-priority
+    # candidates unless a grade was supplied explicitly.
+    if "selection_grade" not in output:
+        output["selection_grade"] = pd.Series(pd.NA, index=output.index, dtype="object")
+        output["selection_grade_source"] = "unavailable"
     output["cutout_grade_rank"] = output["selection_grade"].astype(str).str.upper().map(grade_rank)
     output["cutout_eligible"] = output["has_coadd"].fillna(False).astype(bool) & output["cutout_grade_rank"].notna()
     candidates = output.loc[output["cutout_eligible"]].sort_values(
@@ -1285,7 +1291,7 @@ def enrich_reference_catalog_coadds(
     result = targets.merge(direct, on="target_id", how="left").merge(
         coadd, on="target_id", how="left", suffixes=("", "_map")
     )
-    result["has_coadd"] = result["has_coadd"].fillna(False).astype(bool)
+    result["has_coadd"] = result["has_coadd"].infer_objects(copy=False).fillna(False).astype(bool)
     result["coadd_n_bands"] = pd.to_numeric(result["coadd_n_bands"], errors="coerce").fillna(0).astype(int)
     if "coadd_bands" not in result:
         result["coadd_bands"] = ""
@@ -1487,7 +1493,7 @@ def run_reference_catalog(
         .merge(visits, on="target_id", how="left")
         .merge(visit_status, on="target_id", how="left")
     )
-    catalog["has_coadd"] = catalog["has_coadd"].fillna(False).astype(bool)
+    catalog["has_coadd"] = catalog["has_coadd"].infer_objects(copy=False).fillna(False).astype(bool)
     catalog["coadd_n_bands"] = pd.to_numeric(catalog["coadd_n_bands"], errors="coerce").fillna(0).astype(int)
     skipped = catalog["visit_query_status"].isna()
     catalog.loc[skipped, "visit_query_status"] = "skipped_no_coverage"

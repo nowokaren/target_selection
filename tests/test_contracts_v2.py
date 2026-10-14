@@ -36,7 +36,7 @@ def test_public_provider_registry_is_lazy():
 def test_credentials_can_use_a_private_netrc(tmp_path):
     path = tmp_path / ".netrc"
     set_credentials("opm", "alice", "secret", backend="netrc", netrc_path=path)
-    assert "machine lensingtom.zah.uni-heidelberg.de" in path.read_text()
+    assert 'machine "lensingtom.zah.uni-heidelberg.de"' in path.read_text()
     credentials = get_credentials("opm", backend="netrc", netrc_path=path)
     assert credentials.username == "alice"
     assert credentials.password == "secret"

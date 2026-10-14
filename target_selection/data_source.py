@@ -8,6 +8,7 @@ features and methods that return normalized tables.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 import pandas as pd
@@ -76,7 +77,7 @@ class MOPHandle(ProviderHandle):
 
     def photometry(self, targets: pd.DataFrame, *, client=None, cache_dir="outputs/mop_photometry", refresh: bool = False, errors: str = "ignore", verbose: bool = True, **_) -> pd.DataFrame:
         """Return normalized MOP photometry for one or many targets."""
-        from mop_photometry import load_event_photometry
+        from target_selection.mop_photometry import load_event_photometry
         from .sources.mop import create_client
 
         if "target_id" not in targets and "Target" not in targets:
@@ -128,7 +129,7 @@ class RubinHandle(ProviderHandle):
             raise TypeError(f"Unknown LSST provider settings: {sorted(kwargs)}")
         return self if collection is None or str(collection) == self.collection_name else RubinHandle(str(collection))
 
-    def coverage(self, targets: pd.DataFrame, *, image_kinds=("individual", "coadd"), properties=(), bands=tuple("ugrizy"), **kwargs):
+    def coverage(self, targets: pd.DataFrame, *, image_kinds=("individual", "coadd"), properties=(), bands=tuple("ugrizy"), output_path=None, **kwargs):
         from .collection_access import load_collection_coverage, load_collection_coadds
         result = load_collection_coverage(targets, collection=self.collection.profile, tap_service=self.collection.tap_service, bands=bands, **kwargs)
         if "coadd" in image_kinds:
@@ -137,14 +138,18 @@ class RubinHandle(ProviderHandle):
             positions = result[["target_id", "ra_deg", "dec_deg"]]
             props = self.collection.get_property_map_values(positions, properties=properties, bands=bands)
             result = result.merge(props, on="target_id", how="left")
+        if output_path is not None:
+            output = Path(output_path)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            result.to_csv(output, index=False)
         return result
 
     def get_image(self, targets, *, kind: str = "coadd", **kwargs):
         return self.collection.get_image(targets, image_type=kind, **kwargs)
 
-    def photometry(self, targets, *, coverage=None, method: str = "dia_forced_catalog", **kwargs):
+    def photometry(self, targets, *, coverage=None, method: str = "dia_forced_catalog", output_path=None, **kwargs):
         from .sources.lsst import compute_release_photometry
-        return compute_release_photometry(
+        result = compute_release_photometry(
             targets,
             coverage=coverage,
             method=method,
@@ -153,6 +158,11 @@ class RubinHandle(ProviderHandle):
             butler=self.collection.butler,
             **kwargs,
         )
+        if output_path is not None:
+            output = Path(output_path)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            result.to_csv(output, index=False)
+        return result
 
 
 class DataSourceRegistry:
@@ -197,7 +207,7 @@ def default_data_sources() -> DataSourceRegistry:
     bhtom = BHTOMAdapter()
     registry.register(ProviderHandle("ogle", "survey", ogle.features, ogle.load_targets, metadata=ogle.describe()))
     registry.register(ProviderHandle("opm", "tom", opm.features, opm.load_targets, metadata=opm.describe()))
-    registry.register(ProviderHandle("bhtom", "tom", bhtom.features, metadata=bhtom.describe()))
+    registry.register(ProviderHandle("bhtom", "tom", bhtom.features, bhtom.load_targets, metadata=bhtom.describe()))
     registry.get("ogle").photometry = ogle.photometry
     registry.get("ogle").epochs = ogle.epochs
     registry.get("opm").ranking = opm.ranking
@@ -205,6 +215,7 @@ def default_data_sources() -> DataSourceRegistry:
     registry.get("opm").login = opm.login
     registry.get("opm").private_targets = opm.private_targets
     registry.get("bhtom").login = bhtom.login
+    registry.get("bhtom").photometry = bhtom.photometry
     return registry
 
 

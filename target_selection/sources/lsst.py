@@ -14,7 +14,7 @@ from typing import Iterable
 
 import pandas as pd
 
-from data_release_config import DataReleaseConfig, get_data_release
+from target_selection.data_release_config import DataReleaseConfig, get_data_release
 
 
 SUPPORTED_PHOTOMETRY_METHODS = {"coadd_forced", "dia_forced_catalog", "dia_source_catalog", "dia_combined_catalog", "calexp_forced"}
@@ -164,7 +164,7 @@ def compute_release_photometry(
     release = resolve_data_release(data_release, photometry_method=method)
     method = release.photometry_method
     if method in {"dia_forced_catalog", "dia_source_catalog", "dia_combined_catalog"}:
-        from release_photometry import (
+        from target_selection.release_photometry import (
             query_dia_forced_photometry,
             query_dia_source_photometry,
         )
@@ -187,7 +187,7 @@ def compute_release_photometry(
         raise ValueError(f"coverage is required for {method!r} photometry")
     butler = butler or create_butler(release)
     if method == "coadd_forced":
-        from release_photometry import compute_coadd_forced_photometry
+        from target_selection.release_photometry import compute_coadd_forced_photometry
 
         return compute_coadd_forced_photometry(
             targets,
@@ -198,7 +198,7 @@ def compute_release_photometry(
             verbose=verbose,
         )
     if method == "calexp_forced":
-        from release_photometry import compute_release_forced_photometry
+        from target_selection.release_photometry import compute_release_forced_photometry
 
         return compute_release_forced_photometry(
             targets,
@@ -212,7 +212,7 @@ def compute_release_photometry(
 
 def save_release_photometry(photometry: pd.DataFrame, path: str | Path) -> Path:
     """Save one normalized Rubin photometry table."""
-    from release_photometry import save_release_forced_photometry
+    from target_selection.release_photometry import save_release_forced_photometry
 
     path = Path(path)
     save_release_forced_photometry(photometry, path)
@@ -221,14 +221,14 @@ def save_release_photometry(photometry: pd.DataFrame, path: str | Path) -> Path:
 
 def load_release_photometry(path: str | Path, target_name: str | None = None) -> pd.DataFrame:
     """Load Rubin photometry saved by :func:`save_release_photometry`."""
-    from release_photometry import load_release_forced_photometry
+    from target_selection.release_photometry import load_release_forced_photometry
 
     return load_release_forced_photometry(path, target_name=target_name)
 
 
 def save_target_release_photometry(photometry: pd.DataFrame, directory: str | Path) -> int:
     """Upsert Rubin photometry into one persistent CSV per target."""
-    from release_photometry import save_target_release_photometry as _save
+    from target_selection.release_photometry import save_target_release_photometry as _save
 
     before = len(list(Path(directory).glob("*.csv"))) if Path(directory).exists() else 0
     _save(photometry, directory)

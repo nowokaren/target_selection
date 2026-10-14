@@ -32,8 +32,14 @@ nav:
   - Version 2 reading guide: v2-reading-guide.md
   - Version 2 tools inventory: v2-tools.md
   - Version 2 seasonal workflow: v2-seasonal-workflow.md
+  - Planning pipeline:
+      - Overview: planning_pipeline/README.md
+      - Priority overview: planning_pipeline/priority_flow/README.md
+      - Priority flow: planning_pipeline/priority_flow/decision_flow.md
+      - Decision records: planning_pipeline/decisions/README.md
   - Version 2 usage notebooks: usage-notebooks.md
   - OGLE and OPM providers: providers-ogle-opm.md
+  - BHTOM access: providers-bhtom.md
   - Large reference catalogs: reference-catalog.md
   - Python and CLI API: api.md
   - Terminal visibility reports: visibility-cli.md

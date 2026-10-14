@@ -1,0 +1,196 @@
+Comparación MOP–DP2: Object, DiaObject y cobertura
+
+Se compararon 6.444 eventos MOP contra DP2 usando dos métodos de crossmatch espacial con LSDB/HATS y, en paralelo, la cobertura DP2 calculada previamente con TAP/Butler.
+
+1. Preparación común
+
+Se usaron las posiciones RA/Dec de los targets MOP ya normalizadas:
+
+```python
+mop_points = catalog[['target_id', 'ra_deg', 'dec_deg']].dropna()
+mop_lsdb = lsdb.from_dataframe(
+    mop_points,
+    ra_column='ra_deg', dec_column='dec_deg',
+    lowest_order=5, highest_order=8,
+    margin_threshold=1.0,
+)
+```
+
+Esto convierte MOP en un catálogo HATS/LSDB particionado espacialmente. El radio usado fue 1 arcsec y se eligió como máximo un vecino DP2 por target.
+
+2. Match MOP–Object
+
+Se abrió el catálogo HATS de objetos detectados en coadds:
+
+```python
+dp2 = lsdb.open_catalog(
+    '/rubin/lsdb_data/object_collection',
+    columns=['coord_ra', 'coord_dec'],
+)
+
+object_match = mop_lsdb.crossmatch(
+    dp2,
+    n_neighbors=1,
+    radius_arcsec=1.0,
+    how='left',
+    require_right_margin=True,
+)
+```
+
+Qué significa:
+
+```text
+Object match = hay un Object DP2 dentro de 1 arcsec.
+```
+
+Este match responde si el target MOP corresponde a una fuente catalogada en el coadd. No significa simplemente que haya cobertura de imágenes.
+
+Resultado:
+
+```text
+112 / 6.444 targets tienen Object DP2
+```
+
+3. Match MOP–DiaObject
+
+Se repitió el mismo procedimiento usando el catálogo HATS de DiaObjects:
+
+```python
+dia_dp2 = lsdb.open_catalog(
+    '/rubin/lsdb_data/dia_object_collection',
+    columns=['ra', 'dec', 'diaObjectId', 'nDiaSources'],
+)
+
+diaobject_match = mop_lsdb.crossmatch(
+    dia_dp2,
+    n_neighbors=1,
+    radius_arcsec=1.0,
+    how='left',
+    require_right_margin=True,
+)
+```
+
+DiaObject match = hay un candidato variable/transitorio asociado por posición dentro de 1 arcsec.
+
+Es conceptualmente más parecido al pipeline original:
+
+```text
+MOP → DiaObject → ForcedSourceOnDiaObject
+```
+
+Resultado:
+
+```text
+504 / 6.444 targets tienen DiaObject DP2
+```
+
+Los dos catálogos no responden la misma pregunta:
+
+```text
+Object    → ¿la fuente aparece en el coadd?
+DiaObject → ¿hay detecciones diferenciales asociadas a una fuente variable?
+```
+
+Por eso puede haber DiaObject sin Object y Object sin DiaObject.
+
+4. Cobertura de visitas y coadds
+
+Estas cantidades no se obtuvieron con el crossmatch LSDB de catálogos. Se reutilizaron las tablas calculadas previamente con la consulta de cobertura DP2 y la validación de coadds:
+
+```text
+has_visit_any
+has_coadd
+has_valid_metrics_any
+has_valid_pixels_any
+has_valid_coadd_any
+```
+
+En términos simples:
+
+```text
+has_visit_any   → existe al menos una visita registrada para la posición
+has_coadd              → se encontró un coadd en alguna banda
+has_valid_metrics_any  → alguna banda tiene métricas válidas
+has_valid_pixels_any   → alguna banda tiene píxeles válidos en el cutout
+has_valid_coadd_any    → alguna banda pasa todos los controles del coadd
+```
+
+Importante: `has_visit_any` es un nombre poco afortunado: en esta corrida se calcula simplemente como `n_images_total > 0`. Indica que encontramos al menos una visita para esa posición; no es una validación independiente de píxeles, flags o calidad fotométrica.
+
+Los flags de coadd sí incorporan controles distintos: métricas, píxeles y el estado combinado del coadd. Ninguno exige que exista un Object o un DiaObject catalogado.
+
+5. Cómo se construyó el gráfico
+
+Para cada target se construyó una fila de flags booleanos con siete cualidades:
+
+```text
+alguna visita registrada
+coadd
+métricas de coadd válidas
+cutout con píxeles válidos
+coadd completamente válido
+Object LSDB
+DiaObject LSDB
+```
+
+Cada columna del UpSet representa una combinación observada de esas cualidades. La barra superior muestra cuántos targets tienen exactamente esa combinación.
+
+El orden no es por cantidad. Está ordenado por completitud:
+
+```text
+primero: cumple las 7 condiciones
+después: cumple 6
+después: cumple 5
+...
+```
+
+6. Lectura del resultado mostrado
+
+El total es 6.444 targets.
+
+Resultados globales:
+
+```text
+Al menos una visita registrada        5.184
+Algún coadd                           4.731
+Métricas válidas                      4.687
+Píxeles válidos                       4.723
+Coadd completamente válido            4.681
+Object LSDB                             112
+DiaObject LSDB                          504
+```
+
+Las combinaciones principales del gráfico son:
+
+```text
+64   cumplen todas las condiciones: visita, coadd, métricas, píxeles,
+     coadd válido, Object y DiaObject.
+
+48   tienen todas las condiciones de imagen y Object, pero no DiaObject.
+
+440  tienen todas las condiciones de imagen y DiaObject, pero no Object.
+
+4.129 tienen visita, coadd, métricas, píxeles y coadd válido,
+     pero no Object ni DiaObject.
+
+453  tienen solamente una visita registrada, sin coadd.
+
+1.260 no tienen visitas registradas ni ninguna de las detecciones catalogadas
+     mostradas en el gráfico.
+```
+
+La lectura científica más importante es:
+
+```text
+tener cobertura DP2 no implica tener un Object o un DiaObject.
+```
+
+En particular, hay 4.129 targets con imágenes y coadds completamente válidos, pero sin match en ninguno de los dos catálogos LSDB. Esto puede ocurrir porque la fuente no supera el umbral de detección, no queda catalogada después del deblending o no tiene detecciones diferenciales suficientes para formar un DiaObject.
+
+Finalmente:
+
+```text
+Object y DiaObject son matches de catálogos.
+has_visit_any es sólo presencia de una o más visitas; los flags de coadd sí describen controles de calidad.
+No deben interpretarse como equivalentes.
+```

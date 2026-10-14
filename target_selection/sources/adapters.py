@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from data_release_config import get_data_release
+from target_selection.data_release_config import get_data_release
 from target_selection.config import SourceSpec
 from target_selection.sources.base import SourceContext
 from target_selection.sources.normalization import (

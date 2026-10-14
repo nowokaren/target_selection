@@ -1,6 +1,6 @@
 # MOP target selection with Rubin coverage
 
-This project combines candidate events from target providers, observing history from follow-up surveys, and contextual data from reference surveys to support follow-up planning. Current built-in sources include MOP, CASLEO/HSH, normalized CSV surveys such as CASLEO/JS, and Rubin Data Preview/Data Release collections. The v0.1 MOP + DP2 workflow remains available as a compatible low-level API.
+This project combines candidate events from target providers, observing history from follow-up surveys, and contextual data from reference surveys to support follow-up planning. Current built-in sources include MOP, CASLEO/HSH, normalized CSV surveys such as CASLEO/JS, and Rubin Data Preview/Data Release collections. The modular `data_source` API also supports OGLE, OPM, and BHTOM. The v0.1 MOP + DP2 workflow remains available as a compatible low-level API.
 
 ## Recommended interface
 
@@ -40,6 +40,7 @@ The three source roles are target providers (MOP and future OMP), follow-up surv
 ## Project files
 
 - `notebooks/task_api_examples.ipynb`: recommended task-by-task interactive entry point.
+- `analyses/mop_dp2/`: notebooks, outputs and documentation for the complete MOP–DP2 analysis, including LSDB/HATS matching.
 - `mop_lsst.ipynb`: configuration-driven compatibility notebook for complete runs.
 - `target_selection/`: normalized configuration, adapters, tasks, backend, workflow, and CLI.
 - `target_selection/backend.py`: packaged Rubin-oriented backend used by the compatibility workflow.

@@ -18,6 +18,7 @@ The public handle can therefore be simple:
 data_source.mop
 data_source.hsh
 data_source.ogle
+data_source.bhtom
 data_source.lsst(collection="DP2")
 ```
 
@@ -63,4 +64,3 @@ provider.visible_targets(...)
 Each method returns a normalized table and preserves `provider` provenance.
 Unsupported features should fail clearly or be reported by `supports()`; they
 should not silently return an empty table.
-

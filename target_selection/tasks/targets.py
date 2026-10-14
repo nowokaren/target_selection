@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 from typing import Iterable, Mapping
 
 import pandas as pd
 
-from observatory_observations import canonical_target_name
+from target_selection.observatory_observations import canonical_target_name
 from target_selection.sources.adapters import _normalize_targets
 
 
@@ -24,18 +25,28 @@ def collect_mop_targets(
     verbose: bool = True,
 ) -> pd.DataFrame:
     """Collect MOP visible targets and optionally enrich parameters/photometry."""
-    if verbose:
-        print(f"[targets] Querying MOP visibility for {start_date} to {end_date or start_date}.", flush=True)
-    if mop is None:
-        from target_selection.sources.mop import create_client
-        mop = create_client()
     end_date = end_date or start_date
-    daily = mop.visible_targets(
-        observatory=observatory,
-        start_date=start_date,
-        end_date=end_date,
-        sort_by_mag=False,
-    )
+    cache = Path(cache_dir)
+    cache.mkdir(parents=True, exist_ok=True)
+    cache_key = hashlib.sha256(f"{observatory}|{start_date}|{end_date}".encode()).hexdigest()[:16]
+    visibility_cache = cache / f"mop_visibility_{cache_key}.csv"
+    if visibility_cache.exists() and not refresh:
+        daily = pd.read_csv(visibility_cache)
+        if verbose:
+            print(f"[targets] Reused MOP visibility cache: {visibility_cache.name}", flush=True)
+    else:
+        if verbose:
+            print(f"[targets] Querying MOP visibility for {start_date} to {end_date}.", flush=True)
+        if mop is None:
+            from target_selection.sources.mop import create_client
+            mop = create_client()
+        daily = mop.visible_targets(
+            observatory=observatory,
+            start_date=start_date,
+            end_date=end_date,
+            sort_by_mag=False,
+        )
+        daily.to_csv(visibility_cache, index=False)
     if daily.empty or not include_event_data:
         targets = _normalize_targets(daily, "mop") if not daily.empty else daily
         if not targets.empty:
@@ -43,7 +54,9 @@ def collect_mop_targets(
         if verbose:
             print(f"[targets] MOP targets collected: {len(targets)}", flush=True)
         return targets
-    cache = Path(cache_dir)
+    if mop is None:
+        from target_selection.sources.mop import create_client
+        mop = create_client()
     summary = mop.visibility_summary(
         observatory=observatory,
         start_date=start_date,

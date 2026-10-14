@@ -15,7 +15,7 @@ import json
 import numpy as np
 import pandas as pd
 
-from data_release_config import DataReleaseConfig, get_data_release
+from target_selection.data_release_config import DataReleaseConfig, get_data_release
 
 
 @dataclass
@@ -53,6 +53,27 @@ class CollectionContext:
     def get_property_map_values(self, positions, **kwargs):
         from .rsp_access import get_property_map_values
         return get_property_map_values(positions, collection=self.profile, butler=self.butler, **kwargs)
+
+
+def query_visit_centers_by_band(
+    tap_service: Any,
+    data_release: str | DataReleaseConfig = "DP2",
+) -> pd.DataFrame:
+    """Query one approximate sky position per visit and filter band."""
+    release = get_data_release(data_release)
+    columns = release.visit_columns
+    query = (
+        f"SELECT vd.{columns['visitId']} AS visitId, vd.{columns['band']} AS band, "
+        f"AVG(vd.{release.tap_ra}) AS ra, AVG(vd.{release.tap_dec}) AS dec "
+        f"FROM {release.tap_visit_table} AS vd "
+        f"GROUP BY vd.{columns['visitId']}, vd.{columns['band']}"
+    )
+    job = tap_service.submit_job(query)
+    job.run()
+    job.wait(phases=["COMPLETED", "ERROR"])
+    if job.phase == "ERROR":
+        job.raise_if_error()
+    return job.fetch_result().to_table().to_pandas()
 
     def get_visit_coverage(self, positions, **kwargs):
         from .rsp_access import get_visit_coverage
@@ -265,8 +286,36 @@ def _fits_key(value: Any) -> str:
     return re.sub(r"[^A-Za-z0-9]", "", str(value).strip()).upper()
 
 
+def _collection_evidence_mask(rows: pd.DataFrame) -> pd.Series:
+    """Return targets with at least one coadd or one individual visit.
+
+    PDF products should not contain targets that are present only in the input
+    catalog but have no evidence in the selected data collection.
+    """
+    coadd = pd.Series(False, index=rows.index)
+    if "has_coadd" in rows:
+        coadd |= rows["has_coadd"].fillna(False).astype(bool)
+    band_coadd = [column for column in rows.columns if str(column).startswith("has_coadd_")]
+    if band_coadd:
+        coadd |= rows[band_coadd].fillna(False).astype(bool).any(axis=1)
+
+    visits = pd.Series(False, index=rows.index)
+    for column in ("has_visit_coverage", "has_valid_visit_any"):
+        if column in rows:
+            visits |= rows[column].fillna(False).astype(bool)
+    if "n_images_total" in rows:
+        visits |= pd.to_numeric(rows["n_images_total"], errors="coerce").fillna(0).gt(0)
+    band_visits = [column for column in rows.columns if str(column).startswith("n_images_") and column != "n_images_total"]
+    if band_visits:
+        visits |= pd.to_numeric(rows[band_visits].stack(), errors="coerce").fillna(0).gt(0).groupby(level=0).any().reindex(rows.index, fill_value=False)
+    return coadd | visits
+
+
 def build_cutout_pdf(coverage: pd.DataFrame, *, fits_dir: str | Path, output_path: str | Path, catalog_name: str | None = None, bands: Sequence[str] = tuple("ugrizy"), verbose: bool = True) -> Path:
-    """Create one PDF page per target, showing all available FITS bands."""
+    """Create one PDF page per target with collection evidence.
+
+    Targets with neither a coadd nor an individual visit are excluded.
+    """
     import json
     from astropy.io import fits
     import matplotlib.pyplot as plt
@@ -278,8 +327,7 @@ def build_cutout_pdf(coverage: pd.DataFrame, *, fits_dir: str | Path, output_pat
     rows = coverage.copy()
     if catalog_name is not None and "catalog" in rows:
         rows = rows.loc[rows["catalog"].eq(catalog_name)]
-    if "has_coadd" in rows:
-        rows = rows.loc[rows["has_coadd"].fillna(False).astype(bool)]
+    rows = rows.loc[_collection_evidence_mask(rows)]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     iterator = rows.itertuples(index=False)
     if verbose:
@@ -312,7 +360,11 @@ def build_cutout_pdf(coverage: pd.DataFrame, *, fits_dir: str | Path, output_pat
 
 
 def build_collection_report_pdf(coverage: pd.DataFrame, *, fits_dir: str | Path, asset_dir: str | Path, output_path: str | Path, catalog_name: str | None = None, bands: Sequence[str] = tuple("ugrizy"), manifest_path: str | Path | None = None, verbose: bool = True) -> Path:
-    """Create an English report PDF: maps, distributions, tables, then target cutouts."""
+    """Create a report PDF, excluding targets with no coadd and no visit.
+
+    Targets with only visit coverage are retained as diagnostic pages; targets
+    with neither collection product are omitted.
+    """
     from astropy.io import fits
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
@@ -322,7 +374,7 @@ def build_collection_report_pdf(coverage: pd.DataFrame, *, fits_dir: str | Path,
     rows = coverage.copy()
     if catalog_name is not None and "catalog" in rows:
         rows = rows.loc[rows["catalog"].eq(catalog_name)].copy()
-    rows = rows.loc[rows.get("has_coadd", True).fillna(False).astype(bool)].copy()
+    rows = rows.loc[_collection_evidence_mask(rows)].copy()
     # FITS may have been generated with a catalog prefix or migrated later to
     # filenames beginning with a category/status prefix. Discover all FITS and
     # match them to targets by normalized DB_JNAME/target_id below.

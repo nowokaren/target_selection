@@ -16,10 +16,14 @@ from .credentials import Credentials, get_credentials, remove_credentials, set_c
 from .data_source import DataSourceRegistry, ProviderHandle, data_source
 from .target_io import describe_adapter, describe_source, list_adapters, list_sources
 from .products import plot_sky_dual_metric
+from .catalog_matching import add_match_flag, cached_crossmatch, crossmatch_lsdb, open_hats_catalog
+from .catalog_products import describe_dp2_products, match_dp2_catalog, open_dp2_hats_catalog
+from .quality import apply_coadd_quality_flags
 from .reporting import numeric_series, plot_collection_distributions, write_collection_summaries
-from .planning import (load_candidates, collect_photometry, load_provider_targets, collect_provider_photometry, apply_magnitude_limit,
-                       summarize_visibility, save_visibility_products, save_target_sky_map,
+from .planning import (load_candidates, add_ogle_event_parameters, collect_photometry, load_provider_targets, collect_provider_photometry, apply_magnitude_limit,
+                       evaluate_visibility, visibility_plots, summarize_visibility, save_visibility_products, save_target_sky_map,
                        save_priority_products, save_planning_pdf)
+from .prioritization import PriorityConfig, SCHEDULABLE_CATEGORIES, evaluate_priority
 from .rsp_access import (
     describe, get_coadd_coverage, get_coadd_cutouts, get_image, get_property_map_values,
     get_table, get_visit_coverage, list_images, list_property_maps, list_tables,
@@ -41,7 +45,6 @@ from .tasks import (
     load_target_list,
     merge_targets,
     restrict_targets,
-    evaluate_visibility,
     save_visibility_plots,
     make_visibility_sequence,
     query_lsst_coverage,
@@ -80,11 +83,20 @@ __all__ = [
     "make_visibility_sequence",
     "save_visibility_plots",
     "evaluate_visibility",
+    "visibility_plots",
     "merge_targets",
     "restrict_targets",
     "load_target_list",
     "collect_mop_targets",
     "plot_sky_dual_metric",
+    "crossmatch_lsdb",
+    "cached_crossmatch",
+    "open_hats_catalog",
+    "match_dp2_catalog",
+    "open_dp2_hats_catalog",
+    "describe_dp2_products",
+    "add_match_flag",
+    "apply_coadd_quality_flags",
     "AnalysisConfig",
     "AnalysisResult",
     "ReferenceCatalogConfig",
@@ -112,11 +124,15 @@ __all__ = [
     "load_provider_targets",
     "collect_provider_photometry",
     "load_candidates",
+    "add_ogle_event_parameters",
     "collect_photometry",
     "apply_magnitude_limit",
     "save_visibility_products",
     "save_target_sky_map",
     "save_priority_products",
+    "PriorityConfig",
+    "SCHEDULABLE_CATEGORIES",
+    "evaluate_priority",
     "save_planning_pdf",
     "get_property_map_values",
     "get_table",

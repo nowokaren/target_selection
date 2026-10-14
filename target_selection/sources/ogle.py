@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from io import StringIO
 from pathlib import Path
+import re
 from urllib.parse import urljoin
 
 import pandas as pd
@@ -20,6 +21,7 @@ from ..contracts import normalize_observations, normalize_targets, validate_obse
 
 EWS_URL = "https://ogle.astrouw.edu.pl/ogle4/ews/ews.html"
 ARCHIVE_ROOT = "https://www.astrouw.edu.pl/ogle/ogle4/ews"
+LMC_OPTICAL_DEPTH_ROOT = "https://www.astrouw.edu.pl/ogle/ogle4/LMC_OPTICAL_DEPTH"
 
 
 def _session(session=None):
@@ -40,11 +42,25 @@ def _sexagesimal_dec(value: str) -> float:
 
 def _event_paths(event_id: str) -> dict[str, str]:
     event = str(event_id).strip()
-    year, _, suffix = event.partition("-")
-    slug = suffix.lower().replace("-", "-")
+    parts = event.split("-")
+    lmc_match = re.fullmatch(r"OGLE-LMC-(\d{2})", event, flags=re.IGNORECASE)
+    if lmc_match:
+        # OGLE-LMC-04..19 are from the LMC optical-depth release, not EWS.
+        number = int(lmc_match.group(1))
+        if 4 <= number <= 19:
+            return {
+                "event_url": "https://www.astrouw.edu.pl/ogle/ogle4/LMC_OPTICAL_DEPTH/",
+                "photometry_url": f"{LMC_OPTICAL_DEPTH_ROOT}/phot/{event.upper()}.dat",
+                "archive_url": f"{LMC_OPTICAL_DEPTH_ROOT}/phot.tar.gz",
+                "finding_chart_url": "",
+            }
+    if len(parts) != 4 or parts[0].upper() != "OGLE" or not parts[1].isdigit():
+        raise ValueError(f"Expected OGLE-YYYY-FIELD-NNNN event ID, got {event!r}")
+    year = parts[1]
+    slug = f"{parts[2].lower()}-{parts[3]}"
     base = f"{ARCHIVE_ROOT}/{year}/{slug}"
     return {
-        "event_url": f"https://ogle.astrouw.edu.pl/ogle4/ews/{slug}.html",
+        "event_url": f"https://ogle.astrouw.edu.pl/ogle4/ews/{year}/{slug}.html",
         "photometry_url": f"{base}/phot.dat",
         "archive_url": f"{base}.tar.gz",
         "finding_chart_url": f"{base}/fchart.fts",

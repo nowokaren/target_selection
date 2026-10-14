@@ -7,4 +7,4 @@ These notebooks belong to the new modular API. The historical notebooks in the p
 - `03_lsst_matching_and_products.ipynb`: visits, coadds, property maps, cutouts, and reports.
 - `04_photometry_and_lightcurves.ipynb`: photometry cache and light-curve products.
 - `05_developer_add_an_adapter.ipynb`: extension point for OGLE or another API.
-- `06_microlensing_followup_prioritization.ipynb`: prioritize microlensing follow-up for the next El Leoncito season.
+- `11_seasonal_observing_plan.ipynb`: assess microlensing evidence, rank categories with the shared evaluator, and build an El Leoncito seasonal plan.

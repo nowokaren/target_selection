@@ -16,7 +16,7 @@ from .tasks.visibility import (
     make_visibility_sequence,
     save_visibility_plots,
 )
-from visibility_plotter import summarize_visibility_selection
+from target_selection.visibility_plotter import summarize_visibility_selection
 
 
 def _legacy_targets(targets: pd.DataFrame) -> pd.DataFrame:

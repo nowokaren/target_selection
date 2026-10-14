@@ -49,7 +49,7 @@ Run the notebooks in this order:
 3. `notebooks/v2/03_lsst_matching_and_products.ipynb`
 4. `notebooks/v2/04_photometry_and_lightcurves.ipynb`
 5. `notebooks/v2/05_developer_add_an_adapter.ipynb`
-6. `notebooks/v2/06_microlensing_followup_prioritization.ipynb`
+6. `notebooks/v2/11_seasonal_observing_plan.ipynb`
 
 The first three cover the core HSH/JS seasonal workflow. The fourth covers the photometry branch, and the fifth shows where a provider such as OGLE belongs.
 

@@ -4,6 +4,47 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from pathlib import Path
+
+
+def load_mop_targets(root: str | Path, source_path: str | Path | None = None):
+    """Load the enriched MOP table or the newest complete raw export."""
+    root = Path(root)
+    if source_path is not None:
+        candidates = [Path(source_path)]
+    else:
+        candidates = [
+            root / "tables" / "mop_targets_enriched.csv",
+            root / "tables" / "mop_targets_snapshot.csv",
+        ]
+        candidates += sorted(
+            (root / "raw").glob("mop_targets_*.csv"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+    candidates = [path for path in candidates if path.exists() and ".ipynb_checkpoints" not in path.parts]
+    if not candidates:
+        raise FileNotFoundError(f"No MOP catalog found under {root / 'tables'} or {root / 'raw'}")
+    path = candidates[0]
+    table = pd.read_csv(path).loc[:, lambda frame: ~frame.columns.duplicated()].copy()
+    if "target_id" not in table:
+        source = next((column for column in ("Target", "Name", "target_name") if column in table), None)
+        if source is None:
+            raise ValueError("The MOP catalog has no Target, Name or target_name column")
+        table.insert(0, "target_id", table[source].astype(str).str.strip())
+    table["target_id"] = table["target_id"].astype(str).str.strip()
+    if "Target" not in table:
+        table["Target"] = table["target_id"]
+    ra = next((column for column in ("RA_deg", "ra_deg", "Right Ascension", "ra") if column in table), None)
+    dec = next((column for column in ("Dec_deg", "dec_deg", "Declination", "dec") if column in table), None)
+    if ra is None or dec is None:
+        raise ValueError(f"No RA/Dec columns found in {path}: {list(table.columns)}")
+    table["ra_deg"] = pd.to_numeric(table[ra], errors="coerce")
+    table["dec_deg"] = pd.to_numeric(table[dec], errors="coerce")
+    table["RA_deg"] = table["ra_deg"]
+    table["Dec_deg"] = table["dec_deg"]
+    table["coordinates_valid"] = table[["ra_deg", "dec_deg"]].notna().all(axis=1)
+    return table.drop_duplicates("target_id").reset_index(drop=True), path
 
 
 def create_client():

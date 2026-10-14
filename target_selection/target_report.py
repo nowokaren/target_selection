@@ -1,0 +1,376 @@
+"""Generate graphical reports for individual targets."""
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import astropy.units as u
+from astropy.coordinates import SkyCoord
+from astropy.visualization import ImageNormalize, AsinhStretch
+from astropy.visualization.wcsaxes import SphericalCircle
+from lsst.daf.butler import EmptyQueryResultError
+
+from target_selection.mop_photometry import prepare_lightcurve_data, select_lightcurve_filters
+from target_selection.release_photometry import prepare_release_lightcurve_data, prepare_release_psf_lightcurve_data
+
+
+def plot_target(target, *, butler, tap_service, data_release, calexps=None, photometry=None, photometry_loader=None, release_photometry=None, bands="ugrizy", search_radius=11/60, zoom_arcsec=20, circle_arcsec=3):
+    name, ra, dec = ((target["Target"], target["RA_deg"], target["Dec_deg"])
+                     if hasattr(target, "index") else target)
+    coord = SkyCoord(ra*u.deg, dec*u.deg)
+
+    # The pipeline supplies these rows; the query is only a fallback.
+    if calexps is None:
+        query = f"""SELECT {data_release.visit_select("vd")}
+                    FROM {data_release.tap_visit_table} AS vd
+                    WHERE CONTAINS(POINT('ICRS',vd.{data_release.tap_ra},vd.{data_release.tap_dec}),
+                    CIRCLE('ICRS',{ra},{dec},{search_radius}))=1"""
+        job = tap_service.submit_job(query); job.run(); job.wait(phases=["COMPLETED","ERROR"])
+        if job.phase == "ERROR": job.raise_if_error()
+        calexps = job.fetch_result().to_table().to_pandas()
+
+    # One Butler query returns every band covering the position.
+    refs = []
+    for dataset_type in data_release.coadd_dataset_types:
+        try:
+            refs = list(butler.query_datasets(
+                dataset_type,
+                where=data_release.coadd_spatial_where,
+                bind={"ra": ra, "dec": dec},
+            ))
+        except (EmptyQueryResultError, LookupError):
+            refs = []
+        if refs:
+            break
+    coadds = {}
+    for ref in refs:
+        band = str(ref.dataId["band"])
+        if band not in bands or band in coadds:
+            continue
+        coadd = butler.get(ref)
+        x, y = coadd.fits_wcs.world_to_pixel(coord)
+        ny, nx = coadd.image.array.shape
+        if 0 <= x < nx and 0 <= y < ny:
+            coadds[band] = (coadd, x, y)
+    if not coadds:
+        return None
+
+    release_photometry = (
+        release_photometry if release_photometry is not None else pd.DataFrame()
+    )
+    # DIA match metadata is persisted with the light-curve rows. Keep one
+    # representative match for the report panel and coadd markers.
+    dia_rows = release_photometry
+    if "measurement_method" in dia_rows:
+        dia_rows = dia_rows.loc[
+            dia_rows["measurement_method"].astype(str).isin(["dia_forced_catalog", "dia_source_catalog"])
+        ]
+    dia_match = False
+    dia_status = "not evaluated (coadd forced mode)"
+    dia_object_id = None
+    dia_sep_arcsec = np.nan
+    dia_coord = None
+    if not dia_rows.empty:
+        if "diaObjectId" in dia_rows:
+            matched_rows = dia_rows.loc[
+                pd.to_numeric(dia_rows["diaObjectId"], errors="coerce").notna()
+            ]
+        else:
+            matched_rows = dia_rows.iloc[0:0]
+        if not matched_rows.empty:
+            match_row = matched_rows.iloc[0]
+            dia_match = True
+            dia_status = "matched"
+            dia_object_id = int(float(match_row["diaObjectId"]))
+            dia_sep_arcsec = pd.to_numeric(
+                match_row.get("dia_match_sep_arcsec"), errors="coerce"
+            )
+            dia_ra = pd.to_numeric(match_row.get("dia_object_ra_deg"), errors="coerce")
+            dia_dec = pd.to_numeric(match_row.get("dia_object_dec_deg"), errors="coerce")
+            if pd.notna(dia_ra) and pd.notna(dia_dec):
+                dia_coord = SkyCoord(float(dia_ra) * u.deg, float(dia_dec) * u.deg)
+        else:
+            statuses = dia_rows.get("measurement_status", pd.Series(dtype=str)).astype(str)
+            dia_status = statuses.iloc[0] if not statuses.empty else "no match"
+            if dia_status == "no_dia_object":
+                dia_status = "no match"
+
+    fig = plt.figure(figsize=(21, 11.5))
+    gs = fig.add_gridspec(4, len(bands), height_ratios=[2.55, 2.55, 1.55, 3.0], hspace=.28, wspace=.24)
+
+    for j, band in enumerate(bands):
+        result = coadds.get(band)
+        if result is None:
+            for row in range(3):
+                ax = fig.add_subplot(gs[row,j]); ax.axis("off")
+                if row == 0: ax.text(.5,.5,f"No coadd {band}",ha="center")
+            continue
+        coadd, x, y = result
+
+        arr, wcs = np.asarray(coadd.image.array,float), coadd.fits_wcs
+        finite = arr[np.isfinite(arr)]; vmin,vmax = np.percentile(finite,[5,99.8])
+        norm = ImageNormalize(vmin=vmin,vmax=vmax,stretch=AsinhStretch(.08),clip=True)
+        pixscale = np.mean([s.to_value(u.arcsec) for s in wcs.proj_plane_pixel_scales()])
+        zoom = zoom_arcsec/pixscale
+
+        for row,lim,title in [(0,None,f"{band}: coadd"),(1,zoom,f"zoom ±{zoom_arcsec}″")]:
+            ax = fig.add_subplot(gs[row,j],projection=wcs)
+            im = ax.imshow(arr,origin="lower",cmap="gray",norm=norm)
+            ax.add_patch(SphericalCircle(coord,circle_arcsec*u.arcsec,transform=ax.get_transform("icrs"),
+                                         edgecolor="red",facecolor="none",lw=1.5, label="MOP target"))
+            if dia_match and dia_coord is not None:
+                ax.add_patch(SphericalCircle(
+                    dia_coord, circle_arcsec * u.arcsec,
+                    transform=ax.get_transform("icrs"),
+                    edgecolor="cyan", facecolor="none", lw=1.4,
+                    linestyle="--", label="Matched DiaObject",
+                ))
+            if lim: ax.set(xlim=(x-lim,x+lim),ylim=(y-lim,y+lim))
+            ax.set_title(title,fontsize=10,pad=5)
+            ax.coords[0].set_axislabel("RA [deg]",minpad=1.2); ax.coords[1].set_axislabel("Dec [deg]",minpad=.5)
+            ax.coords[0].set_major_formatter("d.ddd"); ax.coords[1].set_major_formatter("d.ddd")
+            ax.coords[0].set_ticks_position("b")
+            ax.coords[0].set_ticklabel_position("b")
+            ax.coords[0].set_axislabel_position("b")
+            ax.coords[0].set_ticks(direction="out")
+            ax.coords[0].set_ticklabel(size=7, rotation=30, pad=10)
+            ax.coords[1].set_ticklabel(size=7)
+            if row == 0:
+                cb = fig.colorbar(im,ax=ax,fraction=.04,pad=.075)
+                cb.ax.tick_params(labelsize=7); cb.set_label(str(coadd.unit),fontsize=8)
+
+        detail_grid = gs[2, j].subgridspec(1, 2, width_ratios=[1.05, .95], wspace=.32)
+        d = calexps[calexps.band == band].sort_values("expMidptMJD")
+        ax = fig.add_subplot(detail_grid[0, 0])
+        ax.scatter(d.expMidptMJD, d.seeing, s=7)
+        if d.seeing.notna().any():
+            ax.axhline(d.seeing.median(), ls="--", lw=.8, label=f"med={d.seeing.median():.2f}")
+        ax.set(xlabel="MJD", ylabel="seeing", title="Seeing")
+        ax.grid(alpha=.3); ax.tick_params(labelsize=6)
+        if d.seeing.notna().any():
+            ax.legend(fontsize=5.5, frameon=False, handlelength=1.1)
+
+        n = d[["visitId", "detector"]].drop_duplicates().shape[0]
+        desc = d[["seeing", "magLim"]].describe().round(2)
+        cells = [[idx, *values] for idx, values in zip(desc.index, desc.values)]
+        ax = fig.add_subplot(detail_grid[0, 1]); ax.axis("off")
+        tab = ax.table(cellText=cells, colLabels=["", "seeing", "magLim"], cellLoc="center",
+                       colLoc="center", loc="center", colWidths=[.30, .35, .35])
+        tab.auto_set_font_size(False); tab.set_fontsize(5.6); tab.scale(1, .72)
+        for cell in tab.get_celld().values(): cell.PAD = .015
+        ax.set_title(f"N visitId + detector = {n}", fontsize=6.5, pad=1)
+
+    ax_lc = fig.add_subplot(gs[3, :])
+    ax_diff = ax_lc.twinx()
+    if photometry is None:
+        photometry = photometry_loader(name) if photometry_loader is not None else pd.DataFrame()
+    selected_filters = select_lightcurve_filters(photometry)
+    lightcurve_start = pd.Timestamp("2024-01-01")
+    pre_2024_counts: dict[str, int] = {}
+    release_bands = []
+    if not release_photometry.empty and "band" in release_photometry:
+        release_bands = sorted(
+            str(band) for band in release_photometry["band"].dropna().unique()
+        )
+
+    has_mop_data = False
+    plotted_dates = []
+    for filter_name in selected_filters:
+        data = prepare_lightcurve_data(photometry, filter_name)
+        if data.empty:
+            continue
+        before_start = data["Timestamp"] < lightcurve_start
+        if before_start.any():
+            pre_2024_counts[str(filter_name)] = int(before_start.sum())
+        data = data.loc[~before_start]
+        if data.empty:
+            continue
+        dates = mdates.date2num(data["Timestamp"].to_numpy(dtype="datetime64[us]"))
+        magnitudes = data["Magnitude"].to_numpy(dtype=float)
+        errors = data["Error"].to_numpy(dtype=float) if "Error" in data else None
+        valid = np.isfinite(dates) & np.isfinite(magnitudes)
+        if not valid.any():
+            continue
+        if errors is not None:
+            errors = np.where(
+                np.isfinite(errors[valid]) & (errors[valid] >= 0), errors[valid], np.nan,
+            )
+        ax_lc.errorbar(
+            dates[valid], magnitudes[valid], yerr=errors, fmt=".", ms=3,
+            alpha=.75, label=f"MOP {filter_name} (N={valid.sum()})", zorder=2,
+        )
+        plotted_dates.append(dates[valid])
+        has_mop_data = True
+
+    has_release_data = False
+    has_difference_data = False
+    release_cmap = plt.get_cmap("tab10")
+    for index, band in enumerate(release_bands):
+        band_rows = release_photometry.loc[release_photometry["band"].astype(str).eq(str(band))].copy()
+        method_values = band_rows.get("measurement_method", pd.Series("release", index=band_rows.index)).astype(str)
+        for method_index, (method, method_rows) in enumerate(band_rows.assign(_method=method_values).groupby("_method", sort=False)):
+            data = prepare_release_lightcurve_data(method_rows, band)
+            method_key = str(method).lower()
+            method_label = {"dia_forced_catalog": "DIA forced PSF", "dia_source_catalog": "DIA source PSF", "coadd_forced": "coadd forced", "calexp_forced": "calexp forced"}.get(method_key, method)
+            color = release_cmap((index + method_index) % 10)
+            if not data.empty:
+                dates = mdates.date2num(data["Timestamp"].to_numpy(dtype="datetime64[us]"))
+                magnitudes = data["Magnitude"].to_numpy(dtype=float)
+                errors = data["Error"].to_numpy(dtype=float)
+                valid = np.isfinite(dates) & np.isfinite(magnitudes)
+                if valid.any():
+                    errors = np.where(np.isfinite(errors[valid]) & (errors[valid] >= 0), errors[valid], np.nan)
+                    marker = "s" if method_key == "dia_forced_catalog" else ("D" if method_key == "dia_source_catalog" else "o")
+                    ax_lc.errorbar(
+                        dates[valid], magnitudes[valid], yerr=errors, fmt=marker, ms=2.2,
+                        mfc=color, mec="black", mew=.25, color=color, alpha=.9,
+                        label=f"{data_release.name} {method_label} {band} (N={valid.sum()})", zorder=3,
+                    )
+                    plotted_dates.append(dates[valid])
+                    has_release_data = True
+
+            # ForcedSourceOnDiaObject también contiene psfDiffFlux. Es un flujo
+            # firmado, por eso se grafica en nJy en un eje secundario.
+            if method_key in {"dia_forced_catalog", "dia_source_catalog"}:
+                diff = prepare_release_psf_lightcurve_data(method_rows, band, flux_kind="difference")
+                if not diff.empty:
+                    diff_dates = mdates.date2num(diff["Timestamp"].to_numpy(dtype="datetime64[us]"))
+                    diff_flux = diff["Flux"].to_numpy(dtype=float)
+                    diff_errors = diff["Error"].to_numpy(dtype=float)
+                    diff_valid = np.isfinite(diff_dates) & np.isfinite(diff_flux)
+                    if diff_valid.any():
+                        diff_errors = np.where(np.isfinite(diff_errors[diff_valid]) & (diff_errors[diff_valid] >= 0), diff_errors[diff_valid], np.nan)
+                        ax_diff.errorbar(
+                            diff_dates[diff_valid], diff_flux[diff_valid], yerr=diff_errors,
+                            fmt="^", ms=1.9, mfc="none", mec=color, mew=.35,
+                            color=color, alpha=.7,
+                            label=f"{data_release.name} PSF difference {band} (N={diff_valid.sum()})", zorder=2,
+                        )
+                        plotted_dates.append(diff_dates[diff_valid])
+                        has_difference_data = True
+
+    release_dates = np.array([])
+    if calexps is not None and not calexps.empty and "expMidptMJD" in calexps:
+        release_mjd = (
+            pd.to_numeric(calexps["expMidptMJD"], errors="coerce")
+            .dropna().round(5).drop_duplicates().sort_values()
+        )
+        if not release_mjd.empty:
+            release_datetimes = pd.to_datetime(
+                release_mjd.to_numpy(dtype=float), unit="D",
+                origin=pd.Timestamp("1858-11-17"), errors="coerce",
+            )
+            release_datetimes = release_datetimes[~pd.isna(release_datetimes)]
+            release_dates = mdates.date2num(release_datetimes.to_numpy(dtype="datetime64[us]"))
+    if has_mop_data and release_dates.size:
+        y_min, y_max = ax_lc.get_ylim()
+        ax_lc.vlines(
+            release_dates, y_min, y_max, color="tab:purple", alpha=.18, linewidth=.7,
+            label=f"{data_release.name} epochs (N={release_dates.size})", zorder=0,
+        )
+        ax_lc.set_ylim(y_min, y_max)
+
+    if not has_mop_data and not has_release_data and not has_difference_data:
+        message = photometry.attrs.get("error", "No MOP or release photometry available")
+        ax_lc.text(.5, .5, message, ha="center", va="center", transform=ax_lc.transAxes)
+        ax_lc.set_axis_off()
+    else:
+        locator = mdates.AutoDateLocator(minticks=4, maxticks=10)
+        ax_lc.xaxis.set_major_locator(locator)
+        ax_lc.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+        ax_lc.invert_yaxis()
+        if has_mop_data and has_release_data:
+            title = f"MOP + {data_release.name} release photometry"
+        elif has_release_data:
+            title = f"{data_release.name} release photometry"
+        else:
+            title = f"MOP photometry + {data_release.name} epochs"
+        ax_lc.set(xlabel="Date", ylabel="Magnitude", title=title)
+        if has_difference_data:
+            ax_diff.set_ylabel("PSF difference flux [nJy]")
+        else:
+            ax_diff.set_visible(False)
+        # El eje comienza en el primer punto disponible, pero nunca antes de
+        # 2024-01-01, y llega como mínimo hasta la fecha actual.
+        today = pd.Timestamp.now(tz="UTC").tz_convert(None).normalize()
+        if plotted_dates:
+            first_point = pd.Timestamp(mdates.num2date(min(float(d.min()) for d in plotted_dates)).replace(tzinfo=None))
+            last_point = pd.Timestamp(mdates.num2date(max(float(d.max()) for d in plotted_dates)).replace(tzinfo=None))
+            axis_start = max(lightcurve_start, first_point)
+            axis_end = max(today, last_point)
+        else:
+            axis_start = lightcurve_start
+            axis_end = today
+        if axis_end <= axis_start:
+            axis_end = axis_start + pd.Timedelta(days=30)
+        ax_lc.set_xlim(
+            mdates.date2num(axis_start.to_datetime64()),
+            mdates.date2num(axis_end.to_datetime64()),
+        )
+        if has_release_data:
+            valid_release_points = int(pd.to_numeric(
+                release_photometry.get("magnitude"), errors="coerce",
+            ).notna().sum())
+            ax_lc.text(
+                .01, .02, f"{data_release.name} valid photometry points: {valid_release_points}",
+                transform=ax_lc.transAxes, ha="left", va="bottom", fontsize=8,
+                bbox={"facecolor": "white", "edgecolor": "0.65", "alpha": .88, "pad": 2},
+            )
+        if pre_2024_counts:
+            earlier = ", ".join(f"{name}: {count}" for name, count in pre_2024_counts.items())
+            ax_lc.text(
+                .99, .02, f"MOP points before 2024 (not shown): {earlier}",
+                transform=ax_lc.transAxes, ha="right", va="bottom", fontsize=8,
+                bbox={"facecolor": "white", "edgecolor": "0.65", "alpha": .88, "pad": 2},
+            )
+        ax_lc.grid(alpha=.25)
+        handles, labels = ax_lc.get_legend_handles_labels()
+        if has_difference_data:
+            diff_handles, diff_labels = ax_diff.get_legend_handles_labels()
+            handles += diff_handles; labels += diff_labels
+        ax_lc.legend(handles, labels, frameon=False, ncol=min(4, max(1, len(labels))))
+
+    priority = any(str(target.get(k, "")).strip().lower() not in {"","0","0.0","false","nan","none"}
+                   for k in ("priority","tap_priority","tap_priority_longte") if hasattr(target, "get"))
+    flag = " [PRIORITY]" if priority else ""
+    meta_cols = [c for c in ("mag_now","Min airmass","n_visible_nights","coverage_n_visits") if c in target.index]
+    mop_cols = [c for c in target.index if str(c).startswith("mop_") and c not in {"mop_link", "mop_parameters_error"}]
+    preferred = ("t_e", "te", "u_0", "u0", "t_0", "t0", "rho", "pi_e", "magnitude", "baseline", "parameters_status")
+    mop_cols.sort(key=lambda c: (not any(key in str(c).lower() for key in preferred), str(c)))
+
+    label_names = {
+        "mag_now": "Current magnitude", "Min airmass": "Minimum airmass",
+        "n_visible_nights": "Visible nights", "coverage_n_visits": "Rubin visits",
+    }
+    def panel_line(column):
+        raw_label = str(column).removeprefix("mop_")
+        label = label_names.get(column, raw_label)
+        value = target[column]
+        if isinstance(value, (float, np.floating)):
+            value = f"{value:.4g}"
+        unit = " days" if raw_label.casefold() in {"t_e", "te"} and "day" not in str(value).casefold() else ""
+        return f"{label}: {value}{unit}"
+
+    valid_cols = [c for c in meta_cols + mop_cols if str(target[c]).strip().lower() not in {"nan", "none", ""}]
+    panel_lines = ["TARGET DATA", "", f"RA: {ra:.5f}°", f"Dec: {dec:.5f}°", f"Coverage rows: {len(calexps)}"]
+    panel_lines.extend(["", "DIA MATCH", f"Status: {dia_status}"])
+    if dia_match:
+        panel_lines.append(f"DiaObject ID: {dia_object_id}")
+        if pd.notna(dia_sep_arcsec):
+            panel_lines.append(f"Separation: {float(dia_sep_arcsec):.3f} arcsec")
+        if dia_coord is not None:
+            panel_lines.append(f"DiaObject RA: {dia_coord.ra.deg:.6f}°")
+            panel_lines.append(f"DiaObject Dec: {dia_coord.dec.deg:.6f}°")
+    if priority:
+        panel_lines.extend(["", "PRIORITY"])
+    if valid_cols:
+        panel_lines.extend(["", "PARAMETERS", ""] + [panel_line(c) for c in valid_cols])
+
+    fig.suptitle(f"{name}{flag}", y=.985, fontsize=13,
+                 color="crimson" if priority else "black",
+                 fontweight="bold" if priority else "normal")
+    fig.text(.842, .91, "\n".join(panel_lines), ha="left", va="top", fontsize=8.4,
+             linespacing=1.25, family="monospace",
+             bbox=dict(boxstyle="round,pad=.45", facecolor="whitesmoke", edgecolor="0.75"))
+    fig.subplots_adjust(top=.94,bottom=.045,left=.035,right=.815)
+    return fig
