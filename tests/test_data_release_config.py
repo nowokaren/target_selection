@@ -1,6 +1,6 @@
 """Verified TAP visit-column profiles for individual-image releases."""
 
-from data_release_config import get_data_release
+from target_selection.data_release_config import get_data_release
 
 
 def test_dp0_2_visit_query_uses_available_columns():

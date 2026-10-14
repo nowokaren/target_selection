@@ -1,6 +1,6 @@
 import pandas as pd
 
-from release_photometry import (
+from target_selection.release_photometry import (
     _nanojansky_to_magnitude,
     query_dia_forced_photometry,
     load_target_release_photometry,
@@ -134,7 +134,7 @@ class _FakeTapService:
 
 
 def test_dp2_dia_catalog_rows_are_converted_to_plot_magnitudes():
-    from data_release_config import get_data_release
+    from target_selection.data_release_config import get_data_release
 
     result = query_dia_forced_photometry(
         _targets().iloc[:1], tap_service=_FakeTapService(),
@@ -148,8 +148,8 @@ def test_dp2_dia_catalog_rows_are_converted_to_plot_magnitudes():
 
 def test_dp2_dia_catalog_match_preserves_large_object_ids(monkeypatch):
     """A mixed RA/Dec row must not round a 64-bit DiaObject identifier."""
-    from data_release_config import get_data_release
-    import release_photometry
+    from target_selection.data_release_config import get_data_release
+    import target_selection.release_photometry as release_photometry
 
     large_id = 763948238121205967
     calls = []

@@ -140,7 +140,7 @@ def create_lightcurve_plots(
         except Exception as exc:
             if verbose:
                 print(f"[reports] MOP photometry unavailable: {exc}", flush=True)
-    from monitoring_report import create_monitoring_lightcurve_plots
+    from target_selection.monitoring_report import create_monitoring_lightcurve_plots
     return create_monitoring_lightcurve_plots(
         targets, output_dir, mop=mop, mop_photometry_dir=mop_photometry_dir,
         release_photometry=release_photometry, lsst_coverage=coverage,
@@ -168,7 +168,7 @@ def create_lightcurves_report(
     """Task: create a multi-target light-curves PDF."""
     if verbose:
         print(f"[reports] Creating light-curves report for {len(targets)} targets.", flush=True)
-    from monitoring_report import create_monitoring_report
+    from target_selection.monitoring_report import create_monitoring_report
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)

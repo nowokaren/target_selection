@@ -87,12 +87,11 @@ through compatibility adapters.
 
 ### Adapter contracts
 
-The current compatibility protocols in `target_selection.sources.base` still
-exist for config-file runs. The executable backend now lives in
-`target_selection.backend`; the root-level `target_selection_pipeline.py` is only
-a compatibility shim for older notebooks. New task modules import the packaged
-backend, source adapters, and product helpers directly. The refactor target is
-capability-oriented protocols:
+The current implementation is organized around `target_selection.sources`,
+`target_selection.tasks`, and the source-neutral planning modules. Reusable
+photometry, visibility, registry, and report code lives under
+`target_selection/`; notebooks should import it from that package. The refactor
+target is capability-oriented protocols:
 
 | Capability protocol | Required operation type | Normalized result |
 |---|---|---|
@@ -211,12 +210,12 @@ AnalysisResult
 
 ### Why MOP follows two paths
 
-In planning-only mode the MOP adapter collects provider targets directly. In a
-reference-survey run, the primary MOP client is passed into the existing
-validated `target_selection.backend.run_target_selection` backend, which already owns MOP enrichment,
-photometry cache handling, magnitude cuts, and the Rubin-oriented product
-sequence. Other providers and follow-up targets enter that backend through the
-normalized additional-target union.
+The MOP adapter collects and normalizes provider targets through
+`target_selection.sources.mop`. Planning operations such as event-parameter
+enrichment, photometry collection, magnitude filtering, visibility, and priority
+assessment are exposed through `target_selection.planning` and
+`target_selection.prioritization`. Other target providers enter through the
+source adapters and task functions.
 
 This is a deliberate compatibility boundary during the architecture refactor,
 not a distinction users need to encode in their configuration.
@@ -254,13 +253,12 @@ view used for one decision.
 | `target_selection.sources.adapters` | Compatibility adapters for config-file runs |
 | `target_selection.sources.lsst` | Central LSST/Rubin TAP, Butler, coverage, coadd, and photometry helpers |
 | `target_selection.tasks` | Preferred notebook-level task API |
-| `target_selection.workflow` | Config-file orchestration, branch selection, persistence coordination, result objects |
 | `target_selection.products` | Compact discovery index for products that exist |
-| `target_registry` | SQLite schema, migrations, normalized imports, provenance, and cross-run queries |
-| `target_selection.backend` | Packaged validated single-Rubin-release scientific backend and aggregate products |
-| `visibility_plotter` | Visibility physics, feasibility selection, nightly and sequence plots |
-| `release_photometry` | Reference-survey photometry measurement and cache |
-| `target_report`, `monitoring_report` | Individual and aggregate scientific visualization |
+| `target_selection.target_registry` | SQLite schema, migrations, normalized imports, provenance, and cross-run queries |
+| `target_selection.visibility_plotter` | Visibility physics, feasibility selection, nightly and sequence plots |
+| `target_selection.release_photometry` | Reference-survey photometry measurement and cache |
+| `target_selection.target_report`, `target_selection.monitoring_report` | Individual and aggregate scientific visualization |
+| `target_selection.observing_selection_summary` | Visibility and event-stage planning summaries |
 
 ## Failure and resume behavior
 
@@ -283,8 +281,6 @@ discoverable; the registry and native caches make it reusable.
 - `target-selection run --config ...`: command-line entry point.
 - `target_selection.sources.lsst`: only task-level import location for
   LSST/Rubin TAP, Butler, coverage, coadd, and photometry helpers.
-- `target_selection_pipeline.run_target_selection`: root-level compatibility entry point for
-  existing one-Rubin-release workflows.
 
 New notebook workflows should start with task functions. New source
 integrations should implement a source/capability adapter rather than add

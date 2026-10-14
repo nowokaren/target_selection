@@ -239,7 +239,7 @@ data_release = "DP2"
 photometry_method = "coadd_forced"
 ```
 
-`data_release` selects a profile supported by `data_release_config.py`, such as
+`data_release` selects a profile supported by `target_selection.data_release_config`, such as
 `DP0.1`, `DP0.2`, `DP1`, or `DP2`. Multiple definitions may use the same
 adapter with different releases.
 

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from observatory_observations import (
+from target_selection.observatory_observations import (
     canonical_target_name,
     load_hsh_astrometry_catalog,
     summarize_hsh_observations,

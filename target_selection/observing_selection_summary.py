@@ -10,9 +10,9 @@ from matplotlib.patches import Rectangle
 import numpy as np
 import pandas as pd
 
-from target_region import classify_target_region
+from target_selection.target_region import classify_target_region
 
-from observatory_observations import (
+from target_selection.observatory_observations import (
     _numeric_parameter,
     assign_microlensing_stage,
     canonical_target_name,

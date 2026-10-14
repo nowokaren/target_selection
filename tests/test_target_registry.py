@@ -1,6 +1,6 @@
 import pandas as pd
 
-from target_registry import TargetRegistry
+from target_selection.target_registry import TargetRegistry
 
 
 def test_registry_imports_hsh_and_returns_microlensing_targets(tmp_path):

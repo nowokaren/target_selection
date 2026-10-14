@@ -1,6 +1,6 @@
 import pandas as pd
 
-from target_registry import TargetRegistry
+from target_selection.target_registry import TargetRegistry
 from target_selection.config import AnalysisConfig, ProductSettings, SelectionSettings, SourceSpec
 from target_selection.sources import AdapterRegistry, default_adapter_registry
 from target_selection.workflow import AnalysisWorkflow, _merge_targets

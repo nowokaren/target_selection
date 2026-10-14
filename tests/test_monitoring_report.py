@@ -1,7 +1,7 @@
 import pandas as pd
-import monitoring_report
+import target_selection.monitoring_report as monitoring_report
 
-from monitoring_report import (
+from target_selection.monitoring_report import (
     _microlensing_zoom_limits, _monitoring_future_xmax, create_monitoring_report, plot_monitoring_lightcurve,
 )
 

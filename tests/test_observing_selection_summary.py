@@ -1,6 +1,6 @@
 import pandas as pd
 
-from observing_selection_summary import (
+from target_selection.observing_selection_summary import (
     build_observing_selection_summary,
     save_observing_selection_summary,
 )

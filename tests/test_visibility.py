@@ -2,7 +2,7 @@ import matplotlib.image as mpimg
 from pathlib import Path
 import pandas as pd
 
-from visibility_plotter import (
+from target_selection.visibility_plotter import (
     evaluate_nightly_visibility,
     get_observatory,
     observing_window_mask,
@@ -180,7 +180,7 @@ def test_visibility_split_groups_sources_and_limits_parts_to_twenty():
 
 
 def test_nightly_visibility_writes_source_aware_parts(tmp_path, monkeypatch):
-    import visibility_plotter as module
+    import target_selection.visibility_plotter as module
 
     count = 24
     daily = pd.DataFrame({

@@ -177,21 +177,3 @@ clients can be supplied explicitly for tests or non-default RSP environments.
 For staged runs, `query_direct_coadd_coverage` checks real coadd dataset
 references with Butler; coadd-property maps are optional metadata and are not
 used to decide whether a coadd exists.
-
-## Advanced compatibility API
-
-`target_selection_pipeline.run_target_selection` remains available for an
-advanced single-Rubin-release analysis with explicit dependency injection:
-
-```python
-from target_selection_pipeline import run_target_selection
-
-targets, paths = run_target_selection(
-    start_date="2026-08-09",
-    end_date="2026-08-12",
-    data_release="DP2",
-)
-```
-
-Prefer the task API for notebooks and new code. Prefer `run_analysis` only when
-a TOML config/CLI run is the desired interface.

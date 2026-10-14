@@ -1,6 +1,6 @@
 import pandas as pd
 
-from mop_photometry import (
+from target_selection.mop_photometry import (
     prepare_lightcurve_data, select_lightcurve_filters,
     split_mop_candidates_without_event_data, normalize_photometry_provenance, load_event_photometry,
 )

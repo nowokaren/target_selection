@@ -1,6 +1,6 @@
 import pandas as pd
 
-from target_registry import TargetRegistry
+from target_selection.target_registry import TargetRegistry
 from target_selection.data_availability import select_targets_by_data_availability
 
 

@@ -1,7 +1,7 @@
 import pandas as pd
 
-from data_release_config import get_data_release
-from target_selection_pipeline import (
+from target_selection.data_release_config import get_data_release
+from target_selection.legacy_pipeline import (
     create_run_structure,
     plot_sky_dual_metric,
     query_release_visit_centers,
@@ -61,7 +61,7 @@ def test_coverage_summary_counts_unique_visits_per_band():
 
 def test_main_api_has_simple_defaults():
     import inspect
-    import target_selection_pipeline as module
+    import target_selection.legacy_pipeline as module
 
     signature = inspect.signature(run_target_selection)
     assert list(signature.parameters)[:2] == ["start_date", "end_date"]

@@ -1,6 +1,6 @@
 import pytest
 
-from target_region import classify_target_region
+from target_selection.target_region import classify_target_region
 
 
 @pytest.mark.parametrize(

@@ -70,7 +70,7 @@ def write_table_png(
 
     This is the shared simple table style used by the collection summaries.
     Wide scientific planning tables may still use their specialized renderer
-    in ``observing_selection_summary.py``.
+    in ``target_selection.observing_selection_summary``.
     """
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
