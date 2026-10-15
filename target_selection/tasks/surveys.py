@@ -7,12 +7,13 @@ from pathlib import Path
 import pandas as pd
 
 from target_selection.target_registry import TargetRegistry
+from target_selection.cache_paths import OUTPUT_ROOT
 
 
 def import_hsh_inventory(
     inventory_path: str | Path,
     *,
-    database_path: str | Path = "outputs/target_database/target_selection.sqlite",
+    database_path: str | Path = OUTPUT_ROOT / "target_database" / "target_selection.sqlite",
     force: bool = False,
     verbose: bool = True,
 ) -> int:
@@ -40,7 +41,7 @@ def import_hsh_inventory(
 def observed_targets(
     *,
     providers: tuple[str, ...] = ("HSH",),
-    database_path: str | Path = "outputs/target_database/target_selection.sqlite",
+    database_path: str | Path = OUTPUT_ROOT / "target_database" / "target_selection.sqlite",
     verbose: bool = True,
 ) -> pd.DataFrame:
     """Return targets observed by local surveys already imported in the registry."""

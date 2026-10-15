@@ -10,7 +10,7 @@ name = "lastberu_dp2"
 # Git; change input_path when the local file is stored elsewhere.
 input_path = "data/LaStBeRu_data/LaStBeRu_watchlist_LSST_grades.csv"
 output_dir = "outputs"
-cache_dir = "outputs/_cache/reference_catalog"
+cache_dir = "outputs/cache/rubin/reference_catalog"
 
 # Rubin Data Preview/Data Release profile and input-column mapping.
 data_release = "DP2"

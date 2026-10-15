@@ -12,8 +12,10 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import pandas as pd
 
+from target_selection.cache_paths import OUTPUT_ROOT
 
-ROOT = Path("outputs/oct2026_followup/seasonal_candidates")
+
+ROOT = OUTPUT_ROOT / "oct2026_followup" / "seasonal_candidates"
 PLOTS = ROOT / "plots"
 PLOTS.mkdir(exist_ok=True)
 OPM = pd.read_csv(ROOT / "opm_ztf_photometry.csv")
@@ -50,7 +52,7 @@ def main():
         ogle = pd.read_csv(ROOT / f"{name}_ogle.csv")
         ogle["date"] = dates_from_hjd(ogle.epoch_hjd)
         ogle["band"] = "OGLE I"
-        bhtom = pd.read_csv("notebooks/v2/outputs/seasonal_plan/observations.csv")
+        bhtom = pd.read_csv("outputs/notebooks/v2/seasonal_plan/observations.csv")
         bhtom = bhtom.loc[bhtom.target_id.eq(name) & bhtom.provider.eq("bhtom") & bhtom.band.eq("i(GaiaSP)")].copy()
         bhtom["date"] = pd.to_datetime(bhtom.epoch_mjd, unit="D", origin="1858-11-17")
         bhtom["band"] = "BHTOM i"

@@ -9,6 +9,7 @@ from notebooks and from a terminal script.
 from __future__ import annotations
 
 from pathlib import Path
+from inspect import signature
 import re
 import textwrap
 from typing import Iterable, Sequence
@@ -18,6 +19,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.table import Table
 import numpy as np
 import pandas as pd
+
+from .cache_paths import CACHE_ROOT
 
 from .reporting import write_table_png
 from .tasks.visibility import evaluate_visibility as _evaluate_visibility
@@ -87,6 +90,15 @@ def _merge_candidate_rows(frame: pd.DataFrame) -> pd.DataFrame:
         replacement = merged_by_id.get(str(result.at[index, "target_id"]))
         if replacement is not None:
             result.loc[index, replacement.index] = replacement
+    # Rows without duplicates never pass through the group merge above, but
+    # photometry collection still needs their provider provenance.
+    missing_sources = result["source_providers"].fillna("").astype(str).str.strip().eq("")
+    if missing_sources.any():
+        source_values = result.loc[missing_sources, ["provider", "input_sources"]].fillna("").astype(str).agg(",".join, axis=1)
+        result.loc[missing_sources, "source_providers"] = source_values.map(
+            lambda value: ",".join(sorted({item.strip().lower() for item in value.split(",") if item.strip()}))
+        )
+    result["input_sources"] = result["source_providers"]
     return result.reset_index(drop=True)
 
 
@@ -117,7 +129,7 @@ def load_candidates(
     end_date: str | None = None,
     filters: dict | None = None,
     include_photometry: bool = False,
-    cache_dir: str | Path = "outputs/planning/cache",
+    cache_dir: str | Path = CACHE_ROOT,
     output_dir: str | Path | None = None,
     verbose: bool = True,
 ) -> pd.DataFrame:
@@ -249,7 +261,7 @@ def collect_photometry(
     *,
     providers: Sequence[str] | None = None,
     include_associated_surveys: bool = True,
-    cache_dir: str | Path = "outputs/planning/cache",
+    cache_dir: str | Path = CACHE_ROOT,
     output_dir: str | Path | None = None,
     verbose: bool = True,
 ) -> pd.DataFrame:
@@ -279,9 +291,10 @@ def collect_photometry(
         if provider_targets.empty:
             continue
         try:
-            points = provider.photometry(provider_targets, cache_dir=Path(cache_dir) / name, errors="ignore", verbose=verbose)
-        except TypeError:
-            points = provider.photometry(provider_targets)
+            provider_cache = Path(cache_dir) / name.lower() / "photometry"
+            options = {"cache_dir": provider_cache, "errors": "ignore", "verbose": verbose}
+            supported = signature(provider.photometry).parameters
+            points = provider.photometry(provider_targets, **{key: value for key, value in options.items() if key in supported})
         except Exception as exc:
             if verbose:
                 print(f"[planning] Photometry unavailable from {name}: {exc}", flush=True)
@@ -294,7 +307,7 @@ def collect_photometry(
         ogle_targets = work.loc[work["target_id"].astype(str).str.upper().str.startswith("OGLE-")].copy()
         if not ogle_targets.empty:
             try:
-                points = data_source.ogle.photometry(ogle_targets, cache_dir=Path(cache_dir) / "ogle", errors="ignore")
+                points = data_source.ogle.photometry(ogle_targets, cache_dir=Path(cache_dir) / "ogle" / "photometry", errors="ignore")
                 if not points.empty:
                     records.append(points.assign(provider="ogle"))
                     if verbose:

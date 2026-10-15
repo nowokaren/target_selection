@@ -1,53 +1,28 @@
 import pandas as pd
 
-from target_selection.target_registry import TargetRegistry
-from target_selection.data_availability import select_targets_by_data_availability
+from target_selection.planning import apply_magnitude_limit
 
 
-def test_with_data_scope_accepts_mop_photometry_and_followup_images(tmp_path):
-    targets = pd.DataFrame(
-        {
-            "Target": ["mop-event", "hsh-event", "no-data-event"],
-            "RA_deg": [270.0, 271.0, 272.0],
-            "Dec_deg": [-30.0, -31.0, -32.0],
-        }
-    )
-    cache_dir = tmp_path / "mop_photometry"
-    cache_dir.mkdir()
-    pd.DataFrame({"Timestamp": ["2026-08-01T00:00:00Z"]}).to_csv(
-        cache_dir / "mop-event.csv", index=False
-    )
+def test_magnitude_limit_filters_targets_and_keeps_visibility_aligned(tmp_path):
+    targets = pd.DataFrame({
+        "target_id": ["bright", "faint", "unknown"],
+        "magnitude_last": [15.8, 18.1, None],
+    })
+    visibility = pd.DataFrame({
+        "target_id": ["bright", "faint", "unknown"],
+        "n_visible_nights": [3, 4, 2],
+    })
 
-    database = TargetRegistry(tmp_path / "targets.sqlite")
-    database.import_survey_observations(
-        "HSH",
-        targets.loc[[1], ["Target", "RA_deg", "Dec_deg"]].assign(mjd=61000.0),
+    selected, selected_visibility = apply_magnitude_limit(
+        targets, 16.5, visibility_summary=visibility, output_dir=tmp_path,
     )
 
-    included, excluded = select_targets_by_data_availability(
-        targets,
-        mop_photometry_dir=cache_dir,
-        include_mop_photometry=True,
-        database=database,
-        observation_providers=("HSH",),
-    )
-
-    assert included["Target"].tolist() == ["mop-event", "hsh-event"]
-    assert included.set_index("Target").loc["mop-event", "mop_photometry_points"] == 1
-    assert included.set_index("Target").loc["hsh-event", "followup_observation_points"] == 1
-    assert excluded["Target"].tolist() == ["no-data-event"]
-    assert excluded.iloc[0]["target_data_exclusion_reason"]
+    assert selected.target_id.tolist() == ["bright"]
+    assert selected_visibility.target_id.tolist() == ["bright"]
+    assert (tmp_path / "targets_after_magnitude.csv").exists()
 
 
-def test_all_scope_keeps_targets_without_active_source_data(tmp_path):
-    targets = pd.DataFrame(
-        {"Target": ["no-data-event"], "RA_deg": [270.0], "Dec_deg": [-30.0]}
-    )
-
-    included, excluded = select_targets_by_data_availability(
-        targets, target_data_scope="all"
-    )
-
-    assert included["Target"].tolist() == ["no-data-event"]
-    assert not included.iloc[0]["has_target_data"]
-    assert excluded.empty
+def test_no_magnitude_limit_keeps_targets_with_missing_magnitude():
+    targets = pd.DataFrame({"target_id": ["known", "unknown"], "magnitude_last": [15.8, None]})
+    result = apply_magnitude_limit(targets, None)
+    assert result.target_id.tolist() == ["known", "unknown"]

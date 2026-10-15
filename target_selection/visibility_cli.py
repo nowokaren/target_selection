@@ -7,6 +7,7 @@ from typing import Sequence
 
 import pandas as pd
 
+from target_selection.cache_paths import OUTPUT_ROOT, resolve_project_path
 from target_selection.tasks.visibility import evaluate_visibility
 from target_selection.visibility_plotter import compile_visibility_plot_pages, plot_selected_visibility, summarize_visibility_selection
 
@@ -97,10 +98,10 @@ def run_visibility_report(targets: pd.DataFrame, *, start_date: str, end_date: s
                           observatory: str = "El Leoncito", minimum_altitude: float = 40.0,
                           minimum_minutes: float = 90.0, time_step_minutes: int = 1,
                           observing_windows: tuple[str, str] | None = None,
-                          output_dir: str | Path = "outputs/visibility_interactive",
+                          output_dir: str | Path = OUTPUT_ROOT / "visibility_interactive",
                           only_visible: bool = False) -> dict[str, object]:
     end_date = end_date or start_date
-    output_dir = Path(output_dir)
+    output_dir = resolve_project_path(output_dir)
     plot_dir = output_dir / "nightly_plots"
     plot_dir.mkdir(parents=True, exist_ok=True)
     for stale in plot_dir.glob("*_selected_visibility.png"):
@@ -144,7 +145,7 @@ def build_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--minimum-minutes", type=float, default=90.0)
     parser.add_argument("--time-step", type=int, default=1)
     parser.add_argument("--observing-window", nargs=2, metavar=("START", "END"))
-    parser.add_argument("--output", default="outputs/visibility_interactive")
+    parser.add_argument("--output", default=str(OUTPUT_ROOT / "visibility_interactive"))
     parser.add_argument("--match", default="", help="Filtro parcial inicial.")
     parser.add_argument("--names", help="Nombres separados por comas; modo reproducible.")
     parser.add_argument("--selection-file", help="CSV con una columna Target.")
@@ -166,7 +167,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         observatory=args.observatory, minimum_altitude=args.minimum_altitude,
         minimum_minutes=args.minimum_minutes, time_step_minutes=args.time_step,
         observing_windows=tuple(args.observing_window) if args.observing_window else None,
-        output_dir=args.output, only_visible=args.only_visible)
+        output_dir=resolve_project_path(args.output), only_visible=args.only_visible)
     print(f"[visibility] PDF: {result['pdf']}", flush=True)
     print(f"[visibility] Resumen: {result['summary']}", flush=True)
     return 0

@@ -1,6 +1,6 @@
 # Configuration
 
-Date-based observing plans use `configs/example.toml`. Large coordinate catalogs use the separate `configs/lastberu_dp2.toml`; see [Large reference-catalog enrichment](reference-catalog.md).
+The current `target-selection-plan` command takes run settings as CLI arguments; see [Quickstart](quickstart.md). `configs/example.toml` documents the public `AnalysisConfig` model and can be checked with `target-selection validate-config`, but the seasonal CLI does not load it. Large coordinate catalogs use `configs/lastberu_dp2.toml`; see [Large reference-catalog enrichment](reference-catalog.md).
 
 The TOML file is ordered by how often settings normally change. Dates, active
 sources, scientific cuts, and product switches are at the top. Source
@@ -46,7 +46,7 @@ later in the file. Empty lists are valid.
 | Keyword | Role | Typical values |
 |---|---|---|
 | `target_providers` | Candidate/event sources | `[]`, `["mop"]`, `["mop", "my_targets"]`. If `mop` is defined but not selected, it can still enrich follow-up or explicit targets without adding daily MOP-visible candidates. |
-| `followup_surveys` | Telescope programs being evaluated/planned | `[]`, `["casleo_hsh"]`, `["casleo_hsh", "casleo_js"]` |
+| `followup_surveys` | Telescope programs being evaluated/planned | `[]`, `["casleo_hsh"]` |
 | `reference_surveys` | External contextual surveys | `[]`, `["rubin_dp2"]`, `["rubin_dp1", "rubin_dp2"]` |
 
 There is no new global Boolean for every future source. Add one source
@@ -139,7 +139,6 @@ Recommended normalized monitoring layers are:
 
 Product availability also depends on mode. Planning-only mode intentionally
 skips TAP and Butler. It can still generate local visibility, the observing-selection table, and the monitoring PDF; reference-survey products add sky context, coadds, and reference photometry. See [Products](products.md).
-photometry. See [Products](products.md).
 
 ## Common source-definition fields
 
@@ -204,22 +203,15 @@ column_map = { event_id = "Target", ra_icrs = "RA_deg", dec_icrs = "Dec_deg" }
 adapter = "hsh"
 label = "CASLEO/HSH"
 provider_name = "HSH"
-inventory_path = "hsh_data/image_collection_astro.csv"
+inventory_path = "data/hsh_data/image_collection_astro.csv"
 ```
 
 `inventory_path` points to the HSH astrometric image inventory. An optional
 `photometry_path` may point to normalized target photometry.
 
-### Normalized CSV survey, such as JS
+### Normalized CSV survey
 
-```toml
-[followup_surveys.casleo_js]
-adapter = "csv"
-label = "CASLEO/JS"
-provider_name = "JS"
-inventory_path = "js_data/observations.csv"
-photometry_path = "js_data/photometry.csv"
-```
+Additional surveys can use the `csv` adapter once their inventory and optional photometry are normalized. The current JS file, `data/js_data/js_inventory.csv`, records observing history but is not a configured target catalog or photometry table.
 
 Observation rows require `Target` and `mjd`; optional columns include `band`,
 `exptime_s`, `usable`, `RA_deg`, and `Dec_deg`. Photometry requires an epoch
@@ -309,14 +301,13 @@ all source data again.
 Always validate an edited file before a long run:
 
 ```bash
-target-selection validate-config --config configs/my_run.toml
+target-selection validate-config --config configs/example.toml
 ```
 
 This confirms TOML/JSON parsing, selected source references, enabled status,
 duplicates, and basic numeric ranges. It does **not** contact MOP, TAP, or
 Butler and does not open configured CSV files. Adapter, file, credential, and
-remote-service checks occur when the analysis starts. See
-[Architecture: What validation means](architecture.md#what-validation-means).
+remote-service checks occur when the analysis starts.
 
 ### Large-catalog execution order
 

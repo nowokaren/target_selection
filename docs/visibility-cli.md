@@ -8,7 +8,7 @@ plot style as the full pipeline.
 
 From the repository root:
 
-If you are elsewhere, use the absolute path /home/karennowo/target_selection/data/hsh_data/hsh_objects.csv.
+If you are elsewhere, pass an absolute path to the same input file.
 
 ```bash
 target-selection visibility \

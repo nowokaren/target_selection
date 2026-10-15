@@ -24,9 +24,9 @@ result = run_reference_catalog(config)
 catalog = result.catalog
 ```
 
-Use `notebooks/lastberu_reference_catalog.ipynb` to run the analysis
-interactively or inspect the resulting tables, distributions, priorities, and
-cutout grids.
+The command and Python entry point above run this workflow. Inspect the output
+tables, distributions, priorities, and cutout grids in the selected output
+directory.
 
 ## How it scales
 
@@ -100,9 +100,9 @@ outputs/catalog_enrichment/<name>/
 ```
 
 For a small test, use `run_reference_catalog_preview(config, n_targets=200)`
-from Python or set `TARGET_LIMIT = 200` in the notebook. For the complete
-35,400-row run, set `TARGET_LIMIT = None`, run coverage and direct coadd
-detection first, and keep cutouts disabled until the desired subset is known.
+from Python. For the complete 35,400-row run, use `run_reference_catalog(config)`;
+run coverage and direct coadd detection first, and keep cutouts disabled until
+the desired subset is known.
 Keep `tap_max_workers = 2` unless the RSP service permits a larger value.
 Progress is shown by `tqdm` for VisitDetector tiles and cutouts.
 

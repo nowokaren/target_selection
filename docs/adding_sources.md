@@ -1,7 +1,7 @@
 # Adding a source
 
-New sources are added through adapters rather than new arguments on the main
-function.
+New sources are added through adapters and explicit task/planning calls.
+For catalog-like sources loaded with `target_io.load`, use the separate [catalog adapter guide](source-adapters.md). The planning role registry below and the catalog-loading registry serve different interfaces.
 
 ## Choose the semantic role
 
@@ -30,12 +30,12 @@ class OmpTargetProvider:
         )
 ```
 
-Register it without changing the workflow:
+Register it with the source adapter registry:
 
 ```python
 registry = default_adapter_registry()
 registry.register("target_provider", "omp", OmpTargetProvider)
-result = run_analysis(config, adapters=registry)
+# Use the adapter from the task or notebook that needs this provider.
 ```
 
 Then declare and select it in TOML:
@@ -55,8 +55,7 @@ become global keywords.
 ## Normalized columns and configurable maps
 
 All adapters translate external column names into a small internal schema.
-The rest of the workflow, database, tables, and plots use **only** these
-canonical names; a provider's native headers never propagate through the
+Tasks and products use **only** these canonical names; a provider's native headers never propagate through the
 pipeline as requirements.
 
 | Data type | Required canonical columns | Common optional columns |

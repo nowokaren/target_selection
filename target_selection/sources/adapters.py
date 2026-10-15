@@ -149,8 +149,8 @@ class MopTargetProvider:
             parameter_errors="ignore",
             daily_targets=daily,
             parameter_max_workers=context.config.runtime.max_workers,
-            parameter_cache_dir=context.cache_dir / "mop_event_cache",
-            photometry_dir=context.cache_dir / "mop_photometry",
+            parameter_cache_dir=context.cache_dir / "mop" / "event_data",
+            photometry_dir=context.cache_dir / "mop" / "photometry",
             refresh_parameters=context.config.cache.refresh_target_providers,
         ).assign(target_source=self.spec.name, is_mop_visible_in_run=True)
         return apply_authoritative_coordinates(targets)

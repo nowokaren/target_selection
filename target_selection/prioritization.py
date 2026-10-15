@@ -26,6 +26,19 @@ SCHEDULABLE_CATEGORIES = frozenset({
 })
 
 
+def select_schedulable_targets(candidates: pd.DataFrame, priority: pd.DataFrame) -> pd.DataFrame:
+    """Use current-run visibility and evidence categories for the final plan."""
+    current = priority[["target_id", "priority_category", "n_visible_nights", "priority_rank"]]
+    feasible = candidates.drop(columns=["priority_category", "priority_rank", "n_visible_nights"], errors="ignore").merge(
+        current, on="target_id", how="left",
+    )
+    selected = feasible.loc[
+        feasible["priority_category"].isin(SCHEDULABLE_CATEGORIES)
+        & pd.to_numeric(feasible["n_visible_nights"], errors="coerce").fillna(0).gt(0)
+    ]
+    return selected.sort_values("priority_rank").drop(columns=["priority_rank", "n_visible_nights"])
+
+
 @dataclass(frozen=True)
 class PriorityConfig:
     """Explicit, reviewable cutoffs for the first rule-based implementation."""
@@ -340,7 +353,8 @@ def evaluate_priority(
         vis = visibility_summary.copy()
         vis["target_id"] = vis["target_id"].astype(str)
         overlap = (set(result.columns) & set(vis.columns)) - {"target_id"}
-        result = result.merge(vis.drop(columns=list(overlap)), on="target_id", how="left")
+        # Current-run visibility supersedes provider metadata for other windows.
+        result = result.drop(columns=list(overlap)).merge(vis, on="target_id", how="left")
     coverage_by_id: dict[str, pd.Series] = {}
     if casleo_coverage is not None and not casleo_coverage.empty:
         coverage = casleo_coverage.copy()
@@ -469,6 +483,9 @@ def evaluate_priority(
         if output_dir is not None:
             discarded = result.loc[result["target_id"].astype(str).isin(discarded_ids)].copy()
             discarded["discard_reason"] = "No se encontró fotometría utilizable en las fuentes consultadas."
+            if "photometry_requested" in discarded:
+                skipped = ~discarded["photometry_requested"].fillna(False).astype(bool)
+                discarded.loc[skipped, "discard_reason"] = "Fuera del alcance de fotometría solicitado; no se consultaron curvas."
             Path(output_dir).mkdir(parents=True, exist_ok=True)
             discarded.to_csv(Path(output_dir) / "priority_discarded_no_photometry.csv", index=False)
         assessment = assessment.loc[~no_photometry].copy()

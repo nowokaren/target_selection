@@ -1,179 +1,57 @@
-# Python and CLI API
+# API reference
 
-## Recommended Python task API
+## Seasonal plan
 
-The preferred notebook API is task-oriented. Use normal Python variables in one
-cell, and call only the steps needed for the current question. A complete
-walkthrough is available in
-[`notebooks/task_api_examples.ipynb`](https://github.com/nowokaren/target_selection/blob/main/notebooks/task_api_examples.ipynb).
-
-```python
-from target_selection import (
-    collect_mop_targets,
-    evaluate_visibility,
-    query_lsst_coverage,
-    compute_lsst_photometry,
-    create_target_reports,
-)
-
-START_DATE = "2026-08-09"
-END_DATE = "2026-08-12"
-DATA_RELEASE = "DP2"
-OBSERVATORY = "El Leoncito"
-
-# 1. Candidate/event targets from MOP.
-targets = collect_mop_targets(
-    start_date=START_DATE,
-    end_date=END_DATE,
-    observatory=OBSERVATORY,
-)
-
-# 2. Local observability for a telescope schedule.
-visibility = evaluate_visibility(
-    targets,
-    start_date=START_DATE,
-    end_date=END_DATE,
-    observatory=OBSERVATORY,
-    observing_windows=["20:30", "07:00"],
-    minimum_altitude_deg=40,
-    minimum_observable_minutes=90,
-)
-
-# 3. Rubin/LSST coverage and optional photometry.
-coverage = query_lsst_coverage(targets, data_release=DATA_RELEASE)
-photometry = compute_lsst_photometry(
-    targets,
-    coverage,
-    data_release=DATA_RELEASE,
-    method="dia_forced_catalog",
-)
-
-# 4. Optional target dashboards.
-create_target_reports(
-    targets,
-    coverage=coverage,
-    release_photometry=photometry,
-    data_release=DATA_RELEASE,
-    output_dir="outputs/target_reports",
-)
-```
-
-For convenience, the same task sequence can be run with one function while
-still using explicit Python keyword arguments instead of a TOML config:
-
-```python
-from target_selection import run_target_selection_tasks
-
-result = run_target_selection_tasks(
-    start_date="2026-08-09",
-    end_date="2026-08-12",
-    observing_windows=["20:30", "07:00"],
-    data_release="DP2",
-    include_mop=True,
-    compute_visibility=True,
-    query_coverage=True,
-    compute_photometry=True,
-    photometry_method="dia_forced_catalog",
-    make_visibility_plots=True,
-    make_lightcurves_pdf=True,
-)
-
-display(result.targets.head())
-display(result.visibility.head())
-print(result.paths["run"])
-```
-
-This is now the recommended interactive style. `run_analysis(config)` remains
-available for reproducible CLI/config-file runs, but it is no longer the only
-high-level entry point.
-
-## LSST/Rubin helpers
-
-All task-level Rubin access goes through `target_selection.sources.lsst`. It
-centralizes RSP TAP, Butler, coverage, coadd lookup, and release photometry
-helpers. Other modules should import Rubin interactions from that module rather
-than creating TAP/Butler clients directly.
-
-Common wrappers are exposed at package level:
-
-- `query_lsst_coverage(...)`
-- `compute_lsst_photometry(...)`
-- `save_lsst_photometry(...)`
-
-## Config-file API
-
-The config-file workflow is still useful for reproducible runs and CLI use:
-
-```python
-from target_selection import load_config, run_analysis
-
-config = load_config("configs/my_run.toml")
-result = run_analysis(config)
-```
-
-`run_analysis` also accepts the path directly:
-
-```python
-result = run_analysis("configs/my_run.toml")
-```
-
-The result contains one entry per Rubin/Data Release source, or a
-`planning_only` entry when no Rubin source is selected:
-
-```python
-for source_name, run in result.runs.items():
-    print(source_name, run.paths["run"])
-    display(run.targets.head())
-
-display(result.source_updates)
-```
-
-Useful attributes are:
-
-- `result.config`: validated normalized configuration;
-- `result.runs`: named `ReferenceRunResult` objects;
-- `result.targets`: concatenated targets across all results; and
-- `result.source_updates`: import/update counts for selected sources.
-
-## CLI
+The supported end-to-end seasonal interface is `target-selection-plan`:
 
 ```bash
-# Validate without running.
-target-selection validate-config --config configs/my_run.toml
-
-# See available adapter types.
-target-selection list-sources
-
-# Run and print each output directory.
-target-selection run --config configs/my_run.toml
+target-selection-plan \
+  --start-date 2026-10-14 \
+  --end-date 2026-10-31 \
+  --with-photometry \
+  --with-lightcurves \
+  --output-dir outputs/seasonal_plan
 ```
 
-The CLI uses the config-file workflow.
+It is implemented in `target_selection.planning_cli`. Its main steps are:
 
-## Large coordinate catalogs
+1. `load_candidates` retrieves candidates from the selected TOM providers.
+2. `add_ogle_event_parameters` adds available event parameters.
+3. `collect_photometry` loads provider light curves when requested.
+4. `save_visibility_products` calculates date and time visibility.
+5. `evaluate_priority` assigns evidence-based categories and ranks.
+6. The CLI writes selected targets, tables, plots and a seasonal PDF.
 
-```python
-from target_selection import (
-    load_reference_catalog_config, run_reference_catalog,
-    run_reference_catalog_preview, query_direct_coadd_coverage,
-)
+Use `target-selection-plan --help` for all options. `--providers` accepts a comma-separated list; `--minimum-altitude-deg`, `--minimum-visible-minutes`, and `--magnitude-max` control observing feasibility filters.
 
-config = load_reference_catalog_config("configs/lastberu_dp2.toml")
-# Small validation run; the full run omits n_targets.
-result = run_reference_catalog_preview(config, n_targets=200)
-# Full run: result = run_reference_catalog(config)
-display(result.catalog.head())
-```
+For a short date window, `--photometry-scope visible` downloads photometry only for candidates that pass the requested visibility thresholds on at least one night. All candidates still appear in the visibility and priority tables, but those outside the photometry scope lack newly retrieved light curves and may have less complete priority evidence. The default `all` requests photometry for every candidate. The effective arguments are saved in `run_config.json`.
 
-The equivalent CLI command is:
+## Individual task APIs
+
+For notebook or script workflows, import the required functions from `target_selection.tasks`:
+
+- `tasks.targets`: load, collect, merge and restrict target lists.
+- `tasks.visibility`: evaluate visibility and save visibility plots/sequences.
+- `tasks.lsst`: query Rubin coverage and compute or save photometry.
+- `tasks.surveys`: import HSH inventories and inspect observed targets.
+- `tasks.reports`: create target reports and light-curve products.
+
+Provider integrations are implemented under `target_selection.sources`; shared planning functions are in `target_selection.planning`.
+
+## Rubin reference-catalog command
+
+For a large coordinate list use:
 
 ```bash
 target-selection catalog --config configs/lastberu_dp2.toml
 ```
 
-`ReferenceCatalogResult` exposes `catalog`, `catalog_path`, `cutout_plan_path`,
-`manifest_path`, `output_dir`, and the aggregate `summary`. TAP and Butler
-clients can be supplied explicitly for tests or non-default RSP environments.
-For staged runs, `query_direct_coadd_coverage` checks real coadd dataset
-references with Butler; coadd-property maps are optional metadata and are not
-used to decide whether a coadd exists.
+This is a distinct operation implemented in `target_selection.reference_catalog`. See [Reference catalog](reference-catalog.md).
+
+## CLI commands
+
+- `target-selection validate-config --config PATH`
+- `target-selection list-sources`
+- `target-selection catalog --config PATH`
+- `target-selection visibility` for the interactive nightly visibility tool
+- `target-selection-plan ...` for seasonal planning

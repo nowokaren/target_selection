@@ -21,7 +21,7 @@ from target_selection import data_source
 events = data_source.ogle.load_targets(season=2026)
 observations = data_source.ogle.photometry(
     events,
-    cache_dir="outputs/cache/ogle_photometry",
+    cache_dir="outputs/cache/ogle/photometry",
 )
 ```
 

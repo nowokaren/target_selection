@@ -10,7 +10,7 @@ import math
 import re
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from target_selection.data_release_config import DataReleaseConfig, get_data_release
+from target_selection.cache_paths import OUTPUT_ROOT, PROJECT_ROOT, RUBIN_REFERENCE_CACHE
 
 try:  # Python 3.11+
     import tomllib
@@ -108,8 +109,8 @@ class ReferenceCatalogConfig:
 
     input_path: str
     name: str = "reference_catalog"
-    output_dir: str = "outputs"
-    cache_dir: str = "outputs/_cache/reference_catalog"
+    output_dir: str = str(OUTPUT_ROOT)
+    cache_dir: str = str(RUBIN_REFERENCE_CACHE)
     data_release: str = "DP2"
     target_id_column: str = "object_id"
     ra_column: str = "ra"
@@ -203,7 +204,18 @@ def load_reference_catalog_config(path: str | Path) -> ReferenceCatalogConfig:
         values = json.loads(path.read_text(encoding="utf-8"))
     else:
         raise ValueError("Reference catalog configuration must use .toml or .json")
-    return ReferenceCatalogConfig.from_mapping(values)
+    config = ReferenceCatalogConfig.from_mapping(values)
+    path_fields = ("input_path", "output_dir", "cache_dir")
+    resolved = {}
+    for field_name in path_fields:
+        value = getattr(config, field_name)
+        if value is None:
+            continue
+        candidate = Path(value).expanduser()
+        if not candidate.is_absolute():
+            candidate = PROJECT_ROOT / candidate
+        resolved[field_name] = str(candidate)
+    return replace(config, **resolved)
 
 
 def _extra_value(series: pd.Series, key: str) -> pd.Series:

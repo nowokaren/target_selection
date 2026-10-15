@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from target_selection.data_release_config import get_data_release
+from target_selection.cache_paths import MOP_PHOTOMETRY_CACHE, OUTPUT_ROOT
 from target_selection.mop_photometry import load_event_photometry
 from target_selection.sources.lsst import create_butler, create_tap_service
 
@@ -26,8 +27,8 @@ def create_target_report(
     data_release="DP2",
     release_photometry: pd.DataFrame | None = None,
     mop=None,
-    mop_photometry_dir: str | Path = "outputs/mop_photometry",
-    output_dir: str | Path = "outputs/target_reports",
+    mop_photometry_dir: str | Path = MOP_PHOTOMETRY_CACHE,
+    output_dir: str | Path = OUTPUT_ROOT / "target_reports",
     butler=None,
     tap_service=None,
     overwrite: bool = True,
@@ -85,7 +86,7 @@ def create_target_reports(
     *,
     coverage: pd.DataFrame | None = None,
     release_photometry: pd.DataFrame | None = None,
-    output_dir: str | Path = "outputs/target_reports",
+    output_dir: str | Path = OUTPUT_ROOT / "target_reports",
     target_names: list[str] | tuple[str, ...] | None = None,
     max_workers: int | None = None,
     **kwargs,
@@ -123,8 +124,8 @@ def create_target_reports(
 
 
 def create_lightcurve_plots(
-    targets: pd.DataFrame, *, output_dir: str | Path = "outputs/lightcurves",
-    mop_photometry_dir: str | Path = "outputs/mop_photometry",
+    targets: pd.DataFrame, *, output_dir: str | Path = OUTPUT_ROOT / "lightcurves",
+    mop_photometry_dir: str | Path = MOP_PHOTOMETRY_CACHE,
     mop=None, release_photometry: pd.DataFrame | None = None,
     coverage: pd.DataFrame | None = None, observatory_epochs: pd.DataFrame | None = None,
     observatory_photometry: pd.DataFrame | None = None, data_release: str = "DP2",
@@ -154,7 +155,7 @@ def create_lightcurves_report(
     targets: pd.DataFrame,
     *,
     output_path: str | Path,
-    mop_photometry_dir: str | Path = "outputs/mop_photometry",
+    mop_photometry_dir: str | Path = MOP_PHOTOMETRY_CACHE,
     release_photometry: pd.DataFrame | None = None,
     coverage: pd.DataFrame | None = None,
     data_release: str = "DP2",

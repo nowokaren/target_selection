@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from .cache_paths import OUTPUT_ROOT, resolve_project_path
+
 try:  # Python 3.11+
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
@@ -116,7 +118,7 @@ class AnalysisConfig:
     end_date: str | None = None
     name: str = ""
     observatory: str = "El Leoncito"
-    output_dir: str = "outputs"
+    output_dir: str = str(OUTPUT_ROOT)
     target_providers: tuple[str, ...] = ("mop",)
     followup_surveys: tuple[str, ...] = ()
     reference_surveys: tuple[str, ...] = ("rubin_dp2",)
@@ -240,7 +242,7 @@ class AnalysisConfig:
             end_date=str(run["end_date"]) if run.get("end_date") else None,
             name=str(run.get("name", "")).strip(),
             observatory=str(run.get("observatory", "El Leoncito")),
-            output_dir=str(run.get("output_dir", "outputs")),
+            output_dir=str(resolve_project_path(run.get("output_dir", OUTPUT_ROOT))),
             target_providers=_tuple(active.get("target_providers", tuple(providers))),
             followup_surveys=_tuple(active.get("followup_surveys", tuple(followups))),
             reference_surveys=_tuple(

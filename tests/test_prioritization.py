@@ -41,14 +41,15 @@ def test_evaluate_priority_assigns_categories_from_evidence_and_orders(tmp_path)
     assert assessed.loc["OGLE-2026-BLG-1001", "priority_category"] == "NUEVO-RISE"
     assert assessed.loc["OGLE-2026-BLG-1002", "priority_category"] == "NUEVO-PEAK"
     assert assessed.loc["OGLE-2026-BLG-1003", "priority_category"] == "CONTINUIDAD"
-    assert assessed.loc["ZTF-LPV", "priority_category"] == "DESCARTAR"
+    assert "ZTF-LPV" not in assessed.index
     assert "unknown" not in assessed.index
     assert assessed.loc["OGLE-2026-BLG-1001", "rise_significance_sigma"] > 3
     assert assessed.loc["OGLE-2026-BLG-1003", "maximum_magnification"] > 5
     assert assessed.loc["OGLE-2026-BLG-1003", "n_casleo_photometry"] == 1
     assert assessed.loc["OGLE-2026-BLG-1001", "priority_rank"] < assessed.loc["OGLE-2026-BLG-1002", "priority_rank"]
     assert (tmp_path / "priority_assessment.csv").exists()
-    assert "unknown" in pd.read_csv(tmp_path / "priority_discarded_no_photometry.csv").target_id.tolist()
+    discarded = pd.read_csv(tmp_path / "priority_discarded_no_photometry.csv")
+    assert {"unknown", "ZTF-LPV"}.issubset(set(discarded.target_id))
     run_config = json.loads((tmp_path / "priority_config.json").read_text())
     assert run_config["priority_config"]["rise_significance_sigma"] == 3.0
     assert run_config["as_of_utc"].startswith(as_of)
@@ -77,7 +78,7 @@ def test_visibility_changes_feasibility_not_scientific_category():
     now = _jd(as_of)
     target = pd.DataFrame([{
         "target_id": "OGLE-2026-BLG-1004", "event_peak_hjd": now + 12,
-        "event_duration_days": 30, "u0": 0.2,
+        "event_duration_days": 30, "u0": 0.2, "n_visible_nights": 9,
     }])
     curve = pd.DataFrame([
         {"target_id": target.iloc[0].target_id, "epoch_hjd": now - 5 + i * 2,
@@ -87,9 +88,22 @@ def test_visibility_changes_feasibility_not_scientific_category():
     ])
     not_visible = pd.DataFrame([{"target_id": target.iloc[0].target_id, "n_visible_nights": 0}])
     visible = pd.DataFrame([{"target_id": target.iloc[0].target_id, "n_visible_nights": 2}])
-    category_a = evaluate_priority(target, curve, not_visible, as_of=as_of).iloc[0].priority_category
-    category_b = evaluate_priority(target, curve, visible, as_of=as_of).iloc[0].priority_category
-    assert category_a == category_b == "NUEVO-RISE"
+    result_a = evaluate_priority(target, curve, not_visible, as_of=as_of).iloc[0]
+    result_b = evaluate_priority(target, curve, visible, as_of=as_of).iloc[0]
+    assert result_a.priority_category == result_b.priority_category == "NUEVO-RISE"
+    assert result_a.n_visible_nights == 0
+    assert result_b.n_visible_nights == 2
+
+
+def test_discard_reason_distinguishes_unqueried_photometry(tmp_path):
+    targets = pd.DataFrame({
+        "target_id": ["not_requested", "no_measurements"],
+        "photometry_requested": [False, True],
+    })
+    evaluate_priority(targets, pd.DataFrame(), as_of="2026-10-16", output_dir=tmp_path)
+    reasons = pd.read_csv(tmp_path / "priority_discarded_no_photometry.csv").set_index("target_id")["discard_reason"]
+    assert "no se consultaron" in reasons["not_requested"]
+    assert "No se encontró" in reasons["no_measurements"]
 
 
 def test_sparse_survey_column_preserves_provider_labels_and_recent_data():

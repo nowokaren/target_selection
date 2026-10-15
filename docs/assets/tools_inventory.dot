@@ -1,0 +1,39 @@
+digraph G {
+  graph [rankdir=LR, bgcolor="white", pad="0.25", nodesep="0.28", ranksep="0.55", fontname="Helvetica"];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=9, margin="0.10,0.06"];
+  edge [color="#7F8C8D", arrowsize=0.6];
+  subgraph cluster_plan { label="Seasonal planning"; color="#5DADE2"; style="rounded";
+    cli [label="planning_cli\nseasonal command", fillcolor="#D6EAF8", color="#2874A6"];
+    planning [label="planning\ncandidates · photometry\nvisibility · products", fillcolor="#D6EAF8", color="#2874A6"];
+    priority [label="prioritization\nevidence categories\nand rank", fillcolor="#D6EAF8", color="#2874A6"];
+    cli -> planning -> priority;
+  }
+  subgraph cluster_tasks { label="Reusable tasks"; color="#58D68D"; style="rounded";
+    targets [label="tasks.targets\nload · collect · merge\nrestrict", fillcolor="#D5F5E3", color="#148F77"];
+    visibility [label="tasks.visibility\nvisibility · sequences\nplots", fillcolor="#D5F5E3", color="#148F77"];
+    surveys [label="tasks.surveys\nHSH/JS inventory\nobserved targets", fillcolor="#D5F5E3", color="#148F77"];
+    reports [label="tasks.reports\ntarget reports\nlight curves", fillcolor="#D5F5E3", color="#148F77"];
+  }
+  subgraph cluster_sources { label="Sources and Rubin access"; color="#AF7AC5"; style="rounded";
+    adapters [label="sources.adapters\nMOP · CSV · survey adapters", fillcolor="#E8DAEF", color="#7D3C98"];
+    lsst [label="sources.lsst\nTAP · Butler · photometry", fillcolor="#E8DAEF", color="#7D3C98"];
+    rsp [label="rsp_access\nRubin tables · images\ncoverage · maps", fillcolor="#E8DAEF", color="#7D3C98"];
+    refcat [label="reference_catalog\nlarge catalog matching\nand cutouts", fillcolor="#E8DAEF", color="#7D3C98"];
+  }
+  subgraph cluster_support { label="Shared support"; color="#F5CBA7"; style="rounded";
+    cache [label="cache_paths\nshared outputs/cache", fillcolor="#FDEBD0", color="#AF601A"];
+    registry [label="target_registry\nnormalized SQLite data", fillcolor="#FDEBD0", color="#AF601A"];
+    products [label="reporting · products\ntables · plots · PDFs", fillcolor="#FDEBD0", color="#AF601A"];
+  }
+  cli -> adapters [style=dashed];
+  planning -> targets [style=dashed];
+  planning -> visibility [style=dashed];
+  planning -> reports [style=dashed];
+  priority -> surveys [style=dashed];
+  lsst -> rsp;
+  adapters -> cache [style=dashed];
+  lsst -> cache [style=dashed];
+  refcat -> rsp;
+  planning -> products [style=dashed];
+  targets -> registry [style=dashed];
+}

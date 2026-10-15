@@ -13,9 +13,10 @@ import numpy as np
 import pandas as pd
 
 from scripts.oct2026_followup import HSH_DATES, JS_EXTRA_DATES, TARGETS
+from target_selection.cache_paths import OUTPUT_ROOT
 
 
-ROOT = Path("outputs/oct2026_followup")
+ROOT = OUTPUT_ROOT / "oct2026_followup"
 AS_OF = pd.Timestamp("2026-10-07")
 # target: (OGLE EWS t0 HJD, tE days, u_min, baseline I)
 MODEL = {

@@ -118,8 +118,12 @@ class OGLEAdapter:
             "Star No": "ogle_star_id",
         })
         table = table.loc[table["target_id"].notna()].copy()
+        # The EWS table omits the OGLE prefix used by TOM IDs and event URLs.
+        table["target_id"] = table["target_id"].astype(str).str.strip().str.replace(
+            r"^(\d{4}-[A-Za-z]+-\d+)$", r"OGLE-\1", regex=True,
+        )
         if season is not None:
-            prefix = f"{int(season)}-"
+            prefix = f"OGLE-{int(season)}-"
             table = table.loc[table["target_id"].astype(str).str.startswith(prefix)].copy()
         table["ra_deg"] = table["ra_deg"].map(_sexagesimal_ra)
         table["dec_deg"] = table["dec_deg"].map(_sexagesimal_dec)

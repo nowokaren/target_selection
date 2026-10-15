@@ -9,6 +9,7 @@ from typing import Iterable, Mapping
 import pandas as pd
 
 from target_selection.observatory_observations import canonical_target_name
+from target_selection.cache_paths import MOP_CACHE
 from target_selection.sources.adapters import _normalize_targets
 
 
@@ -19,7 +20,7 @@ def collect_mop_targets(
     observatory: str = "El Leoncito",
     mop=None,
     include_event_data: bool = True,
-    cache_dir: str | Path = "outputs",
+    cache_dir: str | Path = MOP_CACHE,
     max_workers: int = 4,
     refresh: bool = False,
     verbose: bool = True,
@@ -29,7 +30,9 @@ def collect_mop_targets(
     cache = Path(cache_dir)
     cache.mkdir(parents=True, exist_ok=True)
     cache_key = hashlib.sha256(f"{observatory}|{start_date}|{end_date}".encode()).hexdigest()[:16]
-    visibility_cache = cache / f"mop_visibility_{cache_key}.csv"
+    visibility_cache_dir = cache / "visibility"
+    visibility_cache_dir.mkdir(parents=True, exist_ok=True)
+    visibility_cache = visibility_cache_dir / f"mop_visibility_{cache_key}.csv"
     if visibility_cache.exists() and not refresh:
         daily = pd.read_csv(visibility_cache)
         if verbose:
@@ -65,8 +68,8 @@ def collect_mop_targets(
         parameter_errors="ignore",
         daily_targets=daily,
         parameter_max_workers=max_workers,
-        parameter_cache_dir=cache / "mop_event_cache",
-        photometry_dir=cache / "mop_photometry",
+        parameter_cache_dir=cache / "event_data",
+        photometry_dir=cache / "photometry",
         refresh_parameters=refresh,
     ).assign(target_source="mop", is_mop_visible_in_run=True)
     from target_selection.sources.mop import apply_authoritative_coordinates

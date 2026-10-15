@@ -14,6 +14,7 @@ from typing import Any, Callable
 import pandas as pd
 
 from .contracts import normalize_targets, validate_targets
+from .cache_paths import MOP_PHOTOMETRY_CACHE
 
 
 @dataclass
@@ -75,7 +76,7 @@ class MOPHandle(ProviderHandle):
         from .sources.mop import load_event_data
         return load_event_data(targets, fields=fields, **kwargs)
 
-    def photometry(self, targets: pd.DataFrame, *, client=None, cache_dir="outputs/mop_photometry", refresh: bool = False, errors: str = "ignore", verbose: bool = True, **_) -> pd.DataFrame:
+    def photometry(self, targets: pd.DataFrame, *, client=None, cache_dir=MOP_PHOTOMETRY_CACHE, refresh: bool = False, errors: str = "ignore", verbose: bool = True, **_) -> pd.DataFrame:
         """Return normalized MOP photometry for one or many targets."""
         from target_selection.mop_photometry import load_event_photometry
         from .sources.mop import create_client

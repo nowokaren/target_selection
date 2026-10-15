@@ -24,9 +24,10 @@ from target_selection.sources.ogle import OGLEAdapter
 from target_selection.sources.opm import OPMAdapter
 from target_selection.sources.bhtom import BHTOMAdapter
 from target_selection.sources.mop import create_client
+from target_selection.cache_paths import OUTPUT_ROOT, RUBIN_PHOTOMETRY_CACHE
 
 
-ROOT = Path("outputs/oct2026_followup")
+ROOT = OUTPUT_ROOT / "oct2026_followup"
 TARGETS = [
     "OGLE-2026-BLG-0888", "OGLE-2026-BLG-0363",
     "OGLE-2026-BLG-0128", "OGLE-2026-BLG-0419",
@@ -98,7 +99,7 @@ def read_or_fetch(path: Path, fetch, *, refresh: bool = False):
 
 
 def load_lsst(name: str) -> pd.DataFrame:
-    for base in [Path("outputs/rubin_photometry"), Path("outputs/mop_dp2_all/dp2/cache/dp2_photometry")]:
+    for base in [RUBIN_PHOTOMETRY_CACHE]:
         path = base / f"{name}.csv"
         if not path.exists():
             continue

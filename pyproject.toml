@@ -30,9 +30,9 @@ interactive = ["prompt_toolkit>=3.0"]
 credentials = ["keyring>=25"]
 
 [tool.setuptools]
-packages = ["target_selection", "target_selection.sources", "scripts"]
+packages = ["target_selection", "target_selection.sources", "target_selection.tasks", "scripts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-q"
+addopts = "-q -p no:cacheprovider"

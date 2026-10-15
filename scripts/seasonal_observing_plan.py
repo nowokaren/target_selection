@@ -24,6 +24,7 @@ from target_selection.planning import (
     save_visibility_products,
 )
 from target_selection.prioritization import SCHEDULABLE_CATEGORIES, evaluate_priority
+from target_selection.cache_paths import CACHE_ROOT, OUTPUT_ROOT, resolve_project_path
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--end-date", required=True)
     parser.add_argument("--providers", default=None, help="Comma-separated TOM names; default: all registered TOMs.")
     parser.add_argument("--observatory", default="El Leoncito")
-    parser.add_argument("--output-dir", default="outputs/seasonal_plan")
+    parser.add_argument("--output-dir", default=str(OUTPUT_ROOT / "seasonal_plan"))
     parser.add_argument("--magnitude-max", type=float, default=None)
     parser.add_argument("--minimum-altitude-deg", type=float, default=40.0)
     parser.add_argument("--minimum-visible-minutes", type=float, default=90.0)
@@ -41,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--with-lsst-cutouts", action="store_true")
     args = parser.parse_args(argv)
 
-    output = Path(args.output_dir)
+    output = resolve_project_path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     providers = None if args.providers is None else tuple(item.strip().lower() for item in args.providers.split(",") if item.strip())
 
@@ -50,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         start_date=args.start_date,
         end_date=args.end_date,
         include_photometry=args.with_photometry,
-        cache_dir=output / "cache",
+        cache_dir=CACHE_ROOT,
     )
     if targets.empty:
         print("No targets were loaded.")
@@ -62,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
         observations = collect_photometry(
             targets,
             providers=providers,
-            cache_dir=output / "cache" / "photometry",
+            cache_dir=CACHE_ROOT,
         )
         observations.to_csv(output / "observations.csv", index=False)
     else:

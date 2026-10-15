@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
+import json
 import pandas as pd
 
 from .planning import (
     add_latest_magnitude, add_ogle_event_parameters, apply_magnitude_limit, collect_photometry, load_candidates,
     save_planning_pdf, save_priority_products, save_target_sky_map,
-    save_visibility_products,
+    save_visibility_products, summarize_visibility,
 )
-from .prioritization import SCHEDULABLE_CATEGORIES, evaluate_priority
+from .prioritization import evaluate_priority, select_schedulable_targets
+from .cache_paths import CACHE_ROOT, OUTPUT_ROOT, resolve_project_path
+from .tasks.visibility import evaluate_visibility as evaluate_nightly_visibility
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -20,26 +22,46 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--end-date", required=True)
     parser.add_argument("--providers", default=None, help="Comma-separated TOM names; default: all registered TOMs.")
     parser.add_argument("--observatory", default="El Leoncito")
-    parser.add_argument("--output-dir", default="outputs/seasonal_plan")
+    parser.add_argument("--output-dir", default=str(OUTPUT_ROOT / "seasonal_plan"))
     parser.add_argument("--magnitude-max", type=float, default=None)
     parser.add_argument("--minimum-altitude-deg", type=float, default=40.0)
     parser.add_argument("--minimum-visible-minutes", type=float, default=90.0)
     parser.add_argument("--with-photometry", action="store_true")
+    parser.add_argument("--photometry-scope", choices=("all", "visible"), default="all", help="Download photometry for all candidates or only those visible on at least one requested night.")
     parser.add_argument("--with-lightcurves", action="store_true")
     parser.add_argument("--with-lsst-cutouts", action="store_true")
     args = parser.parse_args(argv)
-    output = Path(args.output_dir)
+    output = resolve_project_path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     providers = None if args.providers is None else tuple(item.strip().lower() for item in args.providers.split(",") if item.strip())
-    targets = load_candidates(providers, start_date=args.start_date, end_date=args.end_date, include_photometry=args.with_photometry, cache_dir=output / "cache")
+    if providers is None:
+        from .data_source import data_source
+        effective_providers = list(data_source.list(kind="tom"))
+    else:
+        effective_providers = list(providers)
+    run_config = {**vars(args), "output_dir": str(output), "effective_providers": effective_providers}
+    (output / "run_config.json").write_text(json.dumps(run_config, indent=2) + "\n")
+    targets = load_candidates(providers, start_date=args.start_date, end_date=args.end_date, include_photometry=args.with_photometry, cache_dir=CACHE_ROOT)
     if targets.empty:
         print("No targets were loaded.")
         return 1
     targets = add_ogle_event_parameters(targets)
     targets.to_csv(output / "targets_loaded.csv", index=False)
-    observations = collect_photometry(targets, providers=providers, cache_dir=output / "cache" / "photometry") if args.with_photometry else pd.DataFrame()
+    photometry_targets = targets
+    if args.with_photometry and args.photometry_scope == "visible":
+        nightly = evaluate_nightly_visibility(
+            targets, start_date=args.start_date, end_date=args.end_date,
+            observatory=args.observatory, minimum_altitude_deg=args.minimum_altitude_deg,
+            minimum_observable_minutes=args.minimum_visible_minutes,
+        )
+        preliminary_summary = summarize_visibility(nightly)
+        visible_ids = set(preliminary_summary.loc[preliminary_summary["n_visible_nights"].gt(0), "target_id"].astype(str))
+        photometry_targets = targets.loc[targets["target_id"].astype(str).isin(visible_ids)].copy()
+        print(f"Photometry scope: {len(photometry_targets):,}/{len(targets):,} candidates visible on at least one night.", flush=True)
+    observations = collect_photometry(photometry_targets, providers=providers, cache_dir=CACHE_ROOT) if args.with_photometry else pd.DataFrame()
     if args.with_photometry:
         observations.to_csv(output / "observations.csv", index=False)
+        targets["photometry_requested"] = targets["target_id"].astype(str).isin(set(photometry_targets["target_id"].astype(str)))
         targets = add_latest_magnitude(targets, observations)
         targets.to_csv(output / "targets_loaded.csv", index=False)
     candidates = apply_magnitude_limit(targets, args.magnitude_max)
@@ -47,15 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     _, visibility_summary, visibility_plots, visibility_png = save_visibility_products(targets, output / "visibility", start_date=args.start_date, end_date=args.end_date, observatory=args.observatory, minimum_altitude_deg=args.minimum_altitude_deg, minimum_observable_minutes=args.minimum_visible_minutes)
     priority = evaluate_priority(targets, observations, visibility_summary, as_of=args.start_date, output_dir=output / "tables")
     _, priority_png = save_priority_products(priority, output / "tables", name="priority_assessment", title="Evidence-based priority assessment", subtitle="Scientific categories come from the shared evaluator; visibility and magnitude are feasibility evidence.", write_csv=False)
-    feasible = candidates.merge(
-        priority[["target_id", "priority_category", "n_visible_nights", "priority_rank"]],
-        on="target_id", how="left",
-    )
-    selected = feasible.loc[
-        feasible["priority_category"].isin(SCHEDULABLE_CATEGORIES)
-        & pd.to_numeric(feasible["n_visible_nights"], errors="coerce").fillna(0).gt(0)
-    ]
-    selected = selected.sort_values("priority_rank").drop(columns=["priority_rank", "n_visible_nights"])
+    selected = select_schedulable_targets(candidates, priority)
     selected.to_csv(output / "selected_targets.csv", index=False)
     sky_map = save_target_sky_map(selected, output / "sky_map.png", title="Selected targets")
     cutout_images = []

@@ -11,7 +11,8 @@ Small local catalogs and observatory inventories used as inputs are kept under
 `LaStBeRu_data/`). The directory is ignored by Git so private or changing input
 files stay local. Jupyter checkpoint copies are removed; notebooks should read
 the canonical file in the source directory. Downloaded and refreshable provider
-caches belong under `outputs/`, as listed below.
+caches belong under the single shared `outputs/cache/` tree. Run folders
+contain products and provenance, not their own copies of reusable source data.
 
 ## Persistent registry
 
@@ -43,16 +44,27 @@ Large or source-native data remain outside SQLite when that is more practical:
 
 ```text
 outputs/
-├── mop_photometry/          # Complete per-target MOP photometry CSV files
-├── mop_event_cache/         # MOP event and parameter cache
-├── rubin_photometry/        # Persistent per-target Rubin photometry CSV files
-├── _cache/                  # Shared Rubin/TAP query cache
-└── target_database/         # Normalized SQLite registry
+├── cache/
+│   ├── mop/{visibility,event_data,photometry}/
+│   ├── ogle/photometry/
+│   ├── opm/photometry/
+│   ├── bhtom/photometry/
+│   ├── rubin/{photometry,reference_catalog,visit_coverage,coadd_coverage}/
+└── target_database/         # Normalized SQLite registry (persistent state)
 ```
 
-These caches are shared across compatible date ranges and observing schedules.
-Changing only the observing window should not repeat a compatible coverage
-query.
+Repository code should use `target_selection.cache_paths` for shared locations.
+Cache keys and release fingerprints remain inside provider subdirectories when
+results depend on a query or data release. All generated products stay under this same root, grouped by run or analysis
+(e.g. `outputs/notebooks/` and `outputs/analyses/mop_dp2/`). Only reusable
+source/query data belong in `outputs/cache/`. Changing an observing window
+should not repeat a compatible coverage query.
+
+The one-time cache consolidation compared all retained variants by their
+filesystem modification timestamps and kept the newest copy for each cache key.
+The timestamp of creation was unavailable from the filesystem. The audit at
+`outputs/migration_latest_versions.csv` records each choice and the
+removed source paths.
 
 ## One run directory
 
@@ -60,7 +72,7 @@ Each run directory contains a reproducible snapshot and derived products, not
 another complete copy of the database:
 
 ```text
-outputs/<date-range-and-observing-window>/
+outputs/<date-range-and-observing-window>/  # root-level run products
 ├── analysis_config.json
 ├── manifest.json
 ├── product_index.json

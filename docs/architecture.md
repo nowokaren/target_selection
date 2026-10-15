@@ -1,287 +1,60 @@
-# Architecture
+# Current architecture
 
-The architecture separates **data-source definitions**, **data access**,
-**task execution**, **persistence**, and **products**. This allows a new survey,
-event aggregator, local inventory, or catalog to be added without adding
-another provider-specific argument to the main function.
+The package is organized around reusable data sources, explicit tasks and the seasonal planning workflow. There is no single generic orchestration layer that wraps every analysis.
 
-## Core vocabulary
-
-| Term | Meaning | Example |
-|---|---|---|
-| Source kind | What the source is | `survey`, `event_aggregator`, `user_target_list` |
-| Run usage | How a source is used in one run | candidate input, planning telescope, context survey |
-| Source definition | One named source entry | `sources.rubin_dp2`, `sources.mop` |
-| Adapter | Python boundary that translates one source into normalized operations and tables | MOP adapter, HSH CSV adapter, Rubin adapter |
-| Capability | Data offered by a source | `targets`, `coverage`, `photometry`, `images` |
-| Registry | Persistent SQLite catalog shared across runs | `TargetRegistry` |
-| Task | One explicit operation called from Python | `query_lsst_coverage`, `evaluate_visibility` |
-| Product | A run-specific table, plot, PDF, or manifest | `product_index.json` |
-
-### Source kinds and run usage
-
-The core model is not `reference_survey` versus `followup_survey`. Those labels
-describe how a survey is used in a specific run. The stable definition is:
+## Main flow
 
 ```text
-DataSource = source kind + access mode + capabilities
-Run usage  = why this source is selected for this run
+TOM providers + local follow-up inventories + Rubin/reference data
+                              |
+                    target_selection.sources
+                              |
+     target_selection.tasks and target_selection.planning
+                              |
+                 target_selection.prioritization
+                              |
+             tables, plots, reports and seasonal PDF
 ```
 
-| Source kind | Meaning | Examples |
-|---|---|---|
-| `survey` | Observing survey or observing program. It may be wide-field, alert-based, follow-up, or archival. | Rubin/LSST, ZTF, Gaia, OGLE, CASLEO/HSH, CASLEO/JS |
-| `event_aggregator` | System that aggregates or publishes candidate events from one or more surveys. | MOP, future OMP |
-| `user_target_list` | Local list of targets to analyze. | CSV with name, RA, Dec |
-| `local_inventory` | Local image/observation inventory for a survey. | HSH `image_collection_astro.csv`, future JS inventory |
-| `catalog` | Static external catalog used for matching or enrichment. | LaStBeRu |
+## Package areas
 
-A source can expose one or more capabilities: `targets`, `event_parameters`,
-`coverage`, `epochs`, `photometry`, `objects`, `images`, `coadds`, `cutouts`,
-and `astrometry`. A source can be accessed by a Python API, HTTP request,
-TAP/Butler, local CSV, local files, or a database.
-
-Run usage is selected separately. For example, Rubin DP2 can be a context
-survey, a photometry source, and an image source. HSH can be a planning survey
-and an observed-epoch source. MOP can be a candidate input and event-parameter
-source.
-
-### Coordinate authority
-
-Coordinates are normalized independently from target membership. An event may enter the union from MOP visibility, an HSH/JS observation inventory, or a user list, but a successful MOP event-page lookup is the authoritative position for that event. The adapter preserves MOP's sexagesimal strings and full floating-point ICRS values; the merge and registry use an explicit priority so adapter order cannot replace them with a lower-authority coordinate.
-
-The built-in precedence is MOP event page (100), MOP visibility table (90), user target list (80), other provider/reference coordinates (50), and follow-up survey coordinates (10). HSH `CRVAL1`/`CRVAL2` are not target coordinates at all: they remain observation-level `pointing_ra_deg`/`pointing_dec_deg` metadata. Legacy registry coordinates of unknown provenance are ignored until an authoritative source resolves them. Run tables expose the selected source, priority, original MOP strings, and any corrected angular offset. All geometry, TAP, Butler, visibility, and photometry operations use the unrounded canonical floats.
-
-## What an adapter is
-
-An adapter is a small translation layer between a source-specific API, CSV, or
-collection and the normalized workflow. It owns source-specific knowledge such
-as:
-
-- how to create or receive a client;
-- how to query or read source data;
-- how to normalize names, coordinates, epochs, and measurements;
-- how to use source-specific cache state; and
-- which source-specific options are required.
-
-An adapter does **not** decide the global observing workflow or write every
-product. That remains the responsibility of `AnalysisWorkflow` and the
-scientific backends.
-
-### Source specification
-
-Every configured source becomes a `SourceSpec`:
-
-| Field | Purpose |
+| Area | Responsibility |
 |---|---|
-| `name` | Stable name used in active source lists and result provenance |
-| `adapter` | Registered implementation type, such as `mop`, `hsh`, `csv`, or `rubin` |
-| `enabled` | Whether the definition is allowed to be selected |
-| `label` | Human-readable display name |
-| `capabilities` | Descriptive list of data the source offers |
-| `options` | Remaining provider-specific settings, such as a path or Data Release |
+| `target_selection.sources` | Provider and survey adapters, including MOP, OGLE/OPM, BHTOM, HSH/JS and Rubin access. |
+| `target_selection.tasks` | Explicit units of work for targets, visibility, Rubin data, surveys and reports. |
+| `target_selection.planning` | Candidate loading, photometry assembly, visibility products and seasonal report products. |
+| `target_selection.prioritization` | Evidence-based scientific category and within-category rank. |
+| `target_selection.reference_catalog` | Large coordinate-catalog enrichment and Rubin coadd products. |
+| `target_selection.cache_paths` | Canonical shared paths for reusable provider and query caches. |
+| `target_selection.target_registry` | Optional normalized SQLite record of targets, source records, photometry and runs. |
 
-`capabilities` document which tasks a source can support. The new task API uses
-that concept directly, while the older config workflow still maps capabilities
-through compatibility adapters.
+## Entry points
 
-### Adapter contracts
+- `target-selection-plan` runs the seasonal planning workflow.
+- `target-selection catalog` runs reference-catalog enrichment.
+- `target-selection visibility` runs the interactive visibility tool.
+- `target_selection.tasks` exposes independent operations for notebooks and scripts.
 
-The current implementation is organized around `target_selection.sources`,
-`target_selection.tasks`, and the source-neutral planning modules. Reusable
-photometry, visibility, registry, and report code lives under
-`target_selection/`; notebooks should import it from that package. The refactor
-target is capability-oriented protocols:
+The CLI implementations live in `planning_cli.py`, `cli.py`, and `visibility_cli.py` respectively. Each uses the same source adapters and shared cache paths where applicable.
 
-| Capability protocol | Required operation type | Normalized result |
-|---|---|---|
-| `TargetProvider` | collect target rows | `Target`, `RA_deg`, `Dec_deg`, provenance |
-| `EventDataProvider` | enrich event parameters | `t_0`, `t_E`, `u_0`, `mag_now`, priority |
-| `CoverageProvider` | query coverage/epochs | visits/images by target and band |
-| `PhotometryProvider` | load/query light curves | normalized photometry table |
-| `ObjectCatalogProvider` | match catalog objects | counterpart ID and separation |
-| `ImageProvider` / `CutoutProvider` | find images/coadds/cutouts | image metadata and PNG/FITS products |
+## Source and collection interfaces
 
-`SourceContext` gives adapters the validated configuration, persistent
-registry, shared cache directory, and optionally injected clients. Client
-injection keeps tests offline and allows advanced callers to reuse existing
-connections.
+Source definitions identify an adapter and the data it can provide. The adapter handles source access and normalization; scientific selection and reports use the normalized result. A source's capabilities describe available data, while its role in a particular observing plan is configured separately. See [Catalog sources and adapters](source-adapters.md).
 
-### Adapter resolution
+![Sources, adapters and capabilities](assets/diagrams/sources_capabilities.png)
 
-```text
-active source name
-        │
-        ▼
-SourceSpec from the matching role section
-        │
-        ├── role = followup_survey
-        └── adapter = "hsh"
-        │
-        ▼
-AdapterRegistry.create(role, spec)
-        │
-        ▼
-HshFollowupSurvey(spec)
-```
+[Download the sources diagram as PDF](assets/diagrams/sources_capabilities.pdf)
 
-The adapter registry is keyed by both role and adapter name. Therefore a `csv`
-target provider and a `csv` follow-up survey can use different contracts while
-sharing a familiar configuration style.
+The catalog-loading API, visibility API, Rubin collection context and reporting tools have distinct interfaces:
 
-## What validation means
+![Public API relationships](assets/diagrams/public_api.png)
 
-Validation happens in layers. A successful early layer does not imply that a
-remote service or every input file is available.
+[Download the public API diagram as PDF](assets/diagrams/public_api.pdf)
 
-| Layer | When | What it checks | What it does not check |
-|---|---|---|---|
-| Parse and construction | `load_config()` | Valid TOML/JSON, required construction fields, compatible value shapes | Network, credentials, source contents |
-| Configuration validation | `AnalysisConfig.validate()` and `validate-config` | Selected names are defined and enabled, no duplicate active names, altitude/duration/time-step/worker ranges | File existence, adapter registration, TAP/Butler access |
-| Adapter resolution | Start of `run_analysis()` | Adapter type exists for the requested role | Remote availability or scientific completeness |
-| Source validation | Adapter import/query | Required paths, required normalized columns, readable source response | Whether measurements are scientifically high quality |
-| Scientific backend validation | Visibility or reference processing | Supported scope/encoding, release profile, query and image compatibility | Future data changes after the run |
-| Product audit | End of a result | Configuration snapshot, source update audit, existing recommended products | Scientific interpretation by the observer |
+## Data and outputs
 
-`target-selection validate-config` intentionally performs no remote requests.
-It is safe and fast, but “configuration is valid” means the declarative
-structure is internally consistent—not that RSP credentials, TAP, Butler, MOP,
-or local CSV files have all been tested.
+Reusable source data belongs in `outputs/cache/`, not inside individual run directories. Paths are centralized in `target_selection.cache_paths`. Run-specific tables, plots and reports belong under the requested output directory. Local input catalogs remain under `data/`. See [Data and cache](data-and-cache.md).
 
-## Complete internal flow
+## Tests
 
-```text
-run_analysis(config_or_path)
-        │
-        ├── load_config() when a path was supplied
-        └── AnalysisConfig.validate()
-        │
-        ▼
-AnalysisWorkflow.run()
-        │
-        ├── open/migrate TargetRegistry
-        ├── create SourceContext
-        │
-        ├── for each follow-up survey
-        │     ├── resolve adapter
-        │     ├── import observations and optional photometry
-        │     └── obtain previously observed targets
-        │
-        ├── for each target provider
-        │     ├── resolve adapter
-        │     ├── retain primary MOP client for the validated backend
-        │     └── collect additional provider targets
-        │
-        ├── canonicalize and merge additional + observed targets
-        │
-        ├── no reference surveys?
-        │     │
-        │     ├── yes: planning-only branch
-        │     │     ├── collect provider targets directly
-        │     │     ├── build target-night rows
-        │     │     ├── calculate and summarize local visibility
-        │     │     └── write planning tables and optional nightly plots
-        │     │
-        │     └── no: for each reference adapter
-        │           ├── resolve DataReleaseConfig
-        │           ├── call validated run_target_selection backend
-        │           │     ├── MOP visible targets, parameters, photometry
-        │           │     ├── merge additional/follow-up targets
-        │           │     ├── local visibility and magnitude cuts
-        │           │     ├── TAP coverage
-        │           │     ├── Butler coadds
-        │           │     ├── optional reference photometry
-        │           │     └── configured products
-        │           ├── import normalized reference photometry
-        │           └── store ReferenceRunResult
-        │
-        ├── write analysis_config.json
-        ├── write source_updates.csv and source_catalog.csv
-        ├── write product_index.json
-        └── record completed analysis run in SQLite
-        │
-        ▼
-AnalysisResult
-        ├── .runs[name] -> ReferenceRunResult
-        ├── .targets -> one result or concatenated multi-reference view
-        ├── .source_updates
-        └── .config
-```
-
-### Why MOP follows two paths
-
-The MOP adapter collects and normalizes provider targets through
-`target_selection.sources.mop`. Planning operations such as event-parameter
-enrichment, photometry collection, magnitude filtering, visibility, and priority
-assessment are exposed through `target_selection.planning` and
-`target_selection.prioritization`. Other target providers enter through the
-source adapters and task functions.
-
-This is a deliberate compatibility boundary during the architecture refactor,
-not a distinction users need to encode in their configuration.
-
-## Persistence and data ownership
-
-```text
-source-native data                     normalized persistent data
-──────────────────                     ──────────────────────────
-MOP pages and photometry CSVs ─────┐
-Rubin coverage/query caches ───────┼──► TargetRegistry (SQLite)
-HSH/JS user inventories ───────────┘      ├── target identities and aliases
-                                           ├── latest source records
-                                           ├── follow-up epochs
-                                           ├── normalized photometry
-                                           ├── source refresh state
-                                           └── analysis-run records
-                                                      │
-                                                      ▼
-                                           run-specific snapshots/products
-```
-
-Raw and provider-native caches are not forced into SQLite when their native
-representation is more efficient. The registry contains normalized data needed
-across analyses. Run directories contain the exact configuration and derived
-view used for one decision.
-
-## Module ownership
-
-| Module | Responsibility |
-|---|---|
-| `target_selection.config` | Typed source-neutral configuration and structural validation |
-| `target_selection.sources.base` | Adapter protocols and shared context |
-| `target_selection.sources.registry` | Adapter registration and resolution |
-| `target_selection.sources.adapters` | Compatibility adapters for config-file runs |
-| `target_selection.sources.lsst` | Central LSST/Rubin TAP, Butler, coverage, coadd, and photometry helpers |
-| `target_selection.tasks` | Preferred notebook-level task API |
-| `target_selection.products` | Compact discovery index for products that exist |
-| `target_selection.target_registry` | SQLite schema, migrations, normalized imports, provenance, and cross-run queries |
-| `target_selection.visibility_plotter` | Visibility physics, feasibility selection, nightly and sequence plots |
-| `target_selection.release_photometry` | Reference-survey photometry measurement and cache |
-| `target_selection.target_report`, `target_selection.monitoring_report` | Individual and aggregate scientific visualization |
-| `target_selection.observing_selection_summary` | Visibility and event-stage planning summaries |
-
-## Failure and resume behavior
-
-- Source imports use fingerprints or provider-specific caches where available.
-- The persistent registry is updated incrementally.
-- Reference coverage, photometry, and target reports have independent reuse or
-  overwrite controls.
-- A failed product does not redefine source provenance or configuration.
-- Repeating the same configuration with reuse enabled resumes compatible work.
-
-The configuration snapshot and `product_index.json` make a completed result
-discoverable; the registry and native caches make it reusable.
-
-## Public and compatibility boundaries
-
-- `target_selection.tasks` and package-level task functions: recommended
-  notebook API for interactive work with Python variables.
-- `target_selection.run_target_selection_tasks`: convenience task orchestrator.
-- `target_selection.run_analysis`: config-file API for reproducible CLI runs.
-- `target-selection run --config ...`: command-line entry point.
-- `target_selection.sources.lsst`: only task-level import location for
-  LSST/Rubin TAP, Butler, coverage, coadd, and photometry helpers.
-
-New notebook workflows should start with task functions. New source
-integrations should implement a source/capability adapter rather than add
-provider-specific conditions to the workflow. See [Adding a source](adding_sources.md).
+Unit tests cover public imports, configuration, adapters, contracts, prioritization, registry behavior, provider parsing and product generation. They do not require remote Rubin queries; those require the Rubin Science Platform environment and credentials.

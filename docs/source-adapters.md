@@ -20,46 +20,14 @@ target_io.list_adapters()
 target_io.describe_adapter()
 ```
 
-## Adding a new API
+## Adding a catalog adapter
 
-A new API should be implemented as a catalog adapter with a `load` method returning the canonical target table. Register it without changing `target_io.load`:
+A new catalog format needs an adapter with a `load(definition, *, filters=None, verbose=True)` method returning the canonical target table. Register it with `target_io.register_adapter`, then add a source definition under `configs/sources/` that selects the adapter. The adapter should handle source access and normalization; reports and scientific selection stay in their respective modules.
 
-```python
-class OgleAdapter:
-    capabilities = ("targets", "coordinates", "photometry")
-
-    def load(self, definition, *, filters=None, verbose=True):
-        # Query OGLE, normalize its identifiers/coordinates, and apply
-        # source-side filters before returning the canonical table.
-        ...
-
-from target_selection import target_io
-target_io.register_adapter(
-    "ogle", OgleAdapter,
-    capabilities=("targets", "coordinates", "photometry"),
-)
-```
-
-Then define `configs/sources/ogle.toml` with `adapter = "ogle"` and provider-specific options. The adapter should not generate reports or decide the global workflow; those are separate matching and product functions.
+OGLE and OPM already have provider interfaces under `target_selection.sources` and `target_selection.data_source`. Their public access examples are in `notebooks/ogle_data_access.ipynb` and `notebooks/opm_data_access.ipynb`.
 
 `target_io.add_data` is reserved for optional data added after loading, such as photometry or event parameters obtained from another provider.
 
-## Current HSH and JS definitions
+## HSH and JS inputs
 
-The v2 microlensing notebook declares both `hsh_events` and `js_events`, but loads only sources that are ready:
-
-- `hsh_events` is ready and reads `data/hsh_data/hsh_objects.csv`. Its canonical mapping is `object → target_id`, `ra_deg → ra_deg` and `dec_deg → dec_deg`. The current file contains 49 targets.
-- `js_events` is a template only. It expects `data/js_data/observations.csv`, but that file is not present in this workspace. The notebook reports it as not ready and skips it; once the file exists, rerunning the notebook will include it automatically.
-
-When the JS inventory is available, update `configs/sources/js_events.toml` if its path or column names differ, then validate it with:
-
-```python
-from target_selection import target_io
-
-print(target_io.describe_source("js_events"))
-js = target_io.load("js_events")
-print(js.shape)
-print(js[["target_id", "ra_deg", "dec_deg"]].head())
-```
-
-The notebook checks three conditions before loading a source: its TOML definition exists, it is enabled, and its input path exists. This prevents a configured-but-missing JS file from being treated as a valid survey.
+`configs/sources/hsh_events.toml` maps `data/hsh_data/hsh_objects.csv` to canonical target columns. The current `data/js_data/js_inventory.csv` records observation history but has no target coordinates, so it is not configured as a target catalog. The JS/HSH meeting notebook reads that inventory directly and keeps its provenance explicit.
