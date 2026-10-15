@@ -52,7 +52,7 @@ def main():
         ogle = pd.read_csv(ROOT / f"{name}_ogle.csv")
         ogle["date"] = dates_from_hjd(ogle.epoch_hjd)
         ogle["band"] = "OGLE I"
-        bhtom = pd.read_csv("outputs/notebooks/v2/seasonal_plan/observations.csv")
+        bhtom = pd.read_csv(OUTPUT_ROOT / "oct2026_followup" / "raw" / "bhtom" / f"{name}.csv")
         bhtom = bhtom.loc[bhtom.target_id.eq(name) & bhtom.provider.eq("bhtom") & bhtom.band.eq("i(GaiaSP)")].copy()
         bhtom["date"] = pd.to_datetime(bhtom.epoch_mjd, unit="D", origin="1858-11-17")
         bhtom["band"] = "BHTOM i"
