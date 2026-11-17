@@ -38,7 +38,7 @@ The plan uses the shared evidence-based evaluator in `target_selection.prioritiz
 ## Install without Rubin/LSST
 
 ```bash
-git clone --branch v0.2.0 --depth 1 https://github.com/nowokaren/target_selection.git
+git clone --branch v0.2.1 --depth 1 https://github.com/nowokaren/target_selection.git
 cd target_selection
 python -m pip install -e .
 ```
