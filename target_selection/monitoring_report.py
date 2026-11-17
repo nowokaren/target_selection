@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+import hashlib
 import re
 from pathlib import Path
 
@@ -41,11 +42,26 @@ PROVIDER_STYLES = {
 def normalize_monitoring_layers(layers: Iterable[str] | None = None) -> tuple[str, ...]:
     """Validate and normalize the selectable monitoring-report layers."""
     result = DEFAULT_MONITORING_LAYERS if layers is None else tuple(str(item).lower() for item in layers)
-    unknown = set(result) - VALID_MONITORING_LAYERS
+    # A custom follow-up survey uses its normalized provider name as a layer.
+    # Keep built-in aliases, while allowing names such as "mi_survey".
+    unknown = {
+        layer for layer in result
+        if layer not in VALID_MONITORING_LAYERS
+        and not re.fullmatch(r"[a-z][a-z0-9_]*", layer)
+    }
     if unknown:
         choices = ", ".join(sorted(VALID_MONITORING_LAYERS))
         raise ValueError(f"Unknown monitoring layers: {sorted(unknown)}. Options: {choices}")
     return tuple(dict.fromkeys(result))
+
+
+def _provider_style(provider: str) -> dict[str, object]:
+    """Return a stable plotting style, including for user-defined surveys."""
+    if provider in PROVIDER_STYLES:
+        return PROVIDER_STYLES[provider]
+    palette = plt.get_cmap("tab20")
+    index = int.from_bytes(hashlib.sha256(provider.encode()).digest()[:2], "big") % 20
+    return {"color": palette(index), "alpha": 0.18, "label": f"{provider} epochs"}
 
 
 def _mjd_to_dates(values: pd.Series | np.ndarray) -> np.ndarray:
@@ -137,7 +153,7 @@ def _shade_epochs(
     """Shade one vertical coverage lane, darkening nights with more exposure time."""
     if not len(dates):
         return None
-    style = PROVIDER_STYLES[provider]
+    style = _provider_style(provider)
     exposures = (
         pd.to_numeric(pd.Series(exposure_seconds), errors="coerce").fillna(0.0).to_numpy(float)
         if exposure_seconds is not None else np.zeros(len(dates), dtype=float)
@@ -222,7 +238,7 @@ def _plot_provider_photometry(ax, data: pd.DataFrame, provider: str) -> tuple[li
     """Plot provider photometry with a distinct marker and color per band."""
     if data.empty:
         return [], False
-    style = PROVIDER_STYLES[provider]
+    style = _provider_style(provider)
     groups = sorted(
         (str(telescope).strip(), str(band).strip())
         for telescope, band in data[["Telescope", "Filter"]].fillna("").drop_duplicates().itertuples(index=False, name=None)
@@ -365,15 +381,23 @@ def plot_monitoring_lightcurve(
             })
 
     all_epochs = observatory_epochs if observatory_epochs is not None else pd.DataFrame()
-    for provider, layer in (("HSH", "hsh"), ("JS", "js"), ("OPM", "opm_photometry"), ("OGLE", "ogle_photometry"), ("BHTOM", "bhtom_photometry")):
-        if layer not in selected_layers:
+    provider_layers = {
+        "HSH": "hsh", "JS": "js", "OPM": "opm_photometry",
+        "OGLE": "ogle_photometry", "BHTOM": "bhtom_photometry",
+    }
+    survey_names = set()
+    for frame in (all_epochs, observatory_photometry):
+        if frame is not None and not frame.empty and "provider" in frame:
+            survey_names.update(frame["provider"].dropna().astype(str).str.upper())
+    for provider in sorted(survey_names | provider_layers.keys()):
+        layer = provider_layers.get(provider, provider.lower())
+        if layer not in selected_layers and f"{provider.lower()}_photometry" not in selected_layers:
             continue
         local_points = _provider_photometry_points(observatory_photometry, provider)
         provider_handles, plotted = _plot_provider_photometry(ax, local_points, provider)
         if plotted:
             handles.extend(provider_handles)
             has_photometry = True
-            continue
         subset = all_epochs.loc[
             all_epochs["provider"].astype(str).str.upper().eq(provider)
         ].copy() if not all_epochs.empty and "provider" in all_epochs else pd.DataFrame()

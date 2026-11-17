@@ -158,10 +158,11 @@ def _plot_layers(providers, config):
     provider_layers = {
         "mop": "mop_photometry", "opm": "opm_photometry", "bhtom": "bhtom_photometry",
     }
-    survey_layers = {
-        name: "hsh" if config.followup_specs[name].options.get("provider_name", name).upper() == "HSH" else "js"
-        for name in config.followup_surveys
-    } if config else {}
+    survey_layers = {}
+    if config:
+        for name in config.followup_surveys:
+            provider = str(config.followup_specs[name].options.get("provider_name", name)).upper()
+            survey_layers[name] = provider.lower()
     if not config:
         return tuple(dict.fromkeys([
             *(provider_layers[name] for name in providers if name in provider_layers),

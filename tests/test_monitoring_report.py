@@ -70,6 +70,28 @@ def test_monitoring_layers_can_use_local_photometry_or_epoch_markers():
     assert any("HSH photometry" in label for label in labels)
     plt.close(figure)
 
+
+def test_custom_survey_layer_plots_local_photometry_and_epochs():
+    import matplotlib.pyplot as plt
+
+    target = pd.Series({"Target": "event"})
+    photometry = pd.DataFrame({
+        "provider": ["MYSURVEY"], "mjd": [60311.0], "Magnitude": [17.8],
+        "Error": [0.03], "band": ["I"],
+    })
+    epochs = pd.DataFrame({
+        "provider": ["MYSURVEY"], "mjd": [60312.0], "exptime_s": [300.0],
+    })
+    figure, axis = plt.subplots()
+    plot_monitoring_lightcurve(
+        target, pd.DataFrame(), ax=axis, layers=("mysurvey",),
+        observatory_photometry=photometry, observatory_epochs=epochs,
+    )
+    labels = [item.get_text() for item in axis.get_legend().get_texts()]
+    assert any("MYSURVEY I" in label for label in labels)
+    assert any("MYSURVEY epochs" in label for label in labels)
+    plt.close(figure)
+
     figure, axis = plt.subplots()
     epochs = pd.DataFrame({"provider": ["JS", "JS"], "mjd": [60312.0, 60312.1],
                            "exptime_s": [300.0, 300.0], "usable": [True, False]})

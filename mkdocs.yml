@@ -39,6 +39,7 @@ nav:
   - Usage notebooks: usage-notebooks.md
   - OGLE and OPM providers: providers-ogle-opm.md
   - BHTOM access: providers-bhtom.md
+  - Quickstart TOMs and local surveys: quickstart_toms_surveys.md
   - Large reference catalogs: reference-catalog.md
   - Terminal visibility reports: visibility-cli.md
   - Catalog sources and adapters: source-adapters.md
