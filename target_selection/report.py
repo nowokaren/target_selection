@@ -21,17 +21,38 @@ def _normalize_observatory_photometry(frame: pd.DataFrame | None) -> pd.DataFram
         "observation_time": "Timestamp",
         "magnitude": "Magnitude",
         "magnitude_err": "Error",
+        "magnitude_error": "Error",
         "band": "Filter",
         "telescope": "Telescope",
     }
     for source, destination in rename.items():
-        if source in result and destination not in result:
+        if source not in result:
+            continue
+        if destination not in result:
             result[destination] = result[source]
-    if "Timestamp" not in result and "epoch_hjd" in result:
-        hjd = pd.to_numeric(result["epoch_hjd"], errors="coerce")
-        result["Timestamp"] = pd.to_datetime(
-            hjd - 2400000.5, unit="D", origin="1858-11-17", errors="coerce"
+        else:
+            result[destination] = result[destination].combine_first(result[source])
+    timestamp = pd.to_datetime(result.get("Timestamp", pd.Series(pd.NaT, index=result.index)), errors="coerce", utc=True).dt.tz_localize(None)
+    if "Timestamp" not in result and "mjd" in result:
+        timestamp = pd.to_datetime(
+            pd.to_numeric(result["mjd"], errors="coerce"),
+            unit="D", origin="1858-11-17", errors="coerce",
         )
+    numeric_time = pd.to_numeric(result.get("observation_time", result.get("Timestamp", pd.Series(np.nan, index=result.index))), errors="coerce")
+    is_mjd = numeric_time.between(30000, 100000)
+    mjd_timestamp = pd.Series(pd.NaT, index=result.index, dtype="datetime64[ns]")
+    mjd_timestamp.loc[is_mjd] = pd.to_datetime(
+        numeric_time.loc[is_mjd], unit="D", origin="1858-11-17", errors="coerce"
+    )
+    timestamp = timestamp.where(~is_mjd, mjd_timestamp)
+    if "epoch_hjd" in result:
+        hjd = pd.to_numeric(result["epoch_hjd"], errors="coerce")
+        hjd_timestamp = pd.to_datetime(hjd - 2400000.5, unit="D", origin="1858-11-17", errors="coerce")
+        # Numeric observation_time values are often MJD. pandas treats them as
+        # nanoseconds unless converted explicitly, which puts valid points near 1970.
+        valid_hjd = hjd.ge(2450000)
+        timestamp = timestamp.where(~valid_hjd, hjd_timestamp)
+    result["Timestamp"] = timestamp
     if "Error" not in result:
         result["Error"] = np.nan
     if "Filter" not in result:

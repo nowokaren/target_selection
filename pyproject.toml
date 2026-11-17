@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mop-target-selection"
-version = "0.2.0.dev0"
+version = "0.2.0"
 description = "Combine target providers and observing surveys for follow-up planning"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -1,0 +1,54 @@
+# Seasonal plan: TOM candidates plus local HSH image and photometry files.
+[run]
+name = "hsh_followup"
+start_date = "2026-10-16"
+end_date = "2026-10-18"
+observatory = "El Leoncito"
+output_dir = "outputs/seasonal_plan/hsh_followup"
+
+[sources]
+target_providers = ["bhtom", "opm"]
+followup_surveys = ["casleo_hsh"]
+reference_surveys = []
+
+[selection]
+minimum_altitude_deg = 40.0
+minimum_observable_minutes = 90.0
+observing_windows = ["20:30", "07:00"]
+
+[target_providers.bhtom]
+adapter = "bhtom"
+label = "BHTOM"
+classification = "Microlensing Event"
+# Optional: query = { name = "OGLE" }, max_pages = 5
+# Optional: base_url = "https://bh-tom2.astrouw.edu.pl"
+
+[target_providers.opm]
+adapter = "opm"
+label = "OPM"
+minimum_altitude_deg = 40.0
+observing_windows = ["20:30", "07:00"]
+sample_minutes = 60
+# Optional: base_url = "https://lensingtom.zah.uni-heidelberg.de"
+
+[followup_surveys.casleo_hsh]
+adapter = "hsh"
+label = "CASLEO/HSH"
+provider_name = "HSH"
+inventory_path = "../data/hsh_data/image_collection_astro.csv"
+target_catalog_path = "../data/hsh_data/hsh_objects.csv"
+# Set this to a normalized photometry CSV in the same folder:
+# photometry_path = "hsh_photometry.csv"
+# Configure nonstandard headers under [followup_surveys.casleo_hsh.photometry_column_map].
+
+[products]
+monitoring_report = true
+monitoring_layers = ["hsh", "opm_photometry", "bhtom_photometry", "ogle_photometry"]
+
+[cache]
+reuse = true
+database_path = "target_database/target_selection.sqlite"
+
+[runtime]
+max_workers = 4
+verbose = true

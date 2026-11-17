@@ -1376,6 +1376,10 @@ def run_reference_catalog_preview(
 
 
 def _default_clients(release: DataReleaseConfig, tap_service: Any, butler: Any) -> tuple[Any, Any]:
+    if (tap_service is None or butler is None):
+        from .lsst_optional import lsst_available
+        if not lsst_available(operation="Rubin reference-catalog enrichment"):
+            raise RuntimeError("Rubin reference-catalog enrichment requires the LSST/Rubin client packages.")
     if tap_service is None:
         from lsst.rsp import get_tap_service
 

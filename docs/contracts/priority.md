@@ -5,6 +5,23 @@ for scientific categorization and ordering. It produces one row per candidate
 and does not collapse unlike evidence into a weighted score. The category is
 decision support; the observing team makes the final selection.
 
+`classify_event_stage(t0_hjd, tE_days, now_hjd, config)` calculates phase from
+`τ = (now_hjd − t0_hjd) / tE_days` and the configured `tE` boundaries; it does
+not use photometry. `build_priority_evidence` calculates per-target measurements and diagnostics
+without assigning categories, and retains targets with no usable photometry.
+`evaluate_priority` then omits targets without usable photometry and applies the
+named criteria in order; the first matching rule sets the category. Criteria
+are `criterion_ended_event`, `criterion_supported_event`,
+`criterion_post_baseline`, `criterion_casleo_continuity`,
+`criterion_casleo_stale_photometry`, `criterion_casleo_missing_uncertainty`,
+`criterion_casleo_observing_question`, `criterion_casleo_no_added_information`,
+`criterion_rising_event`, `criterion_peak_event`, `criterion_stale_photometry`,
+`criterion_declining_event`, `criterion_unknown_event_stage`, and
+`criterion_fallback`. `PriorityConfig` exposes the thresholds and windows they
+use. The offline `notebooks/priority_assessment.ipynb` has one switchable cell
+per criterion, shows its evidence and decision for every target, and ends with
+a comparison to `evaluate_priority` as currently implemented.
+
 ## `priority_assessment.csv`
 
 One row per `target_id`, ordered by category and then by the category's
@@ -24,9 +41,10 @@ magnitude_assessment, n_visible_nights, best_observable_minutes
 
 Photometry-derived stage counts, model parameters, visibility summaries,
 instrument magnitude-limit flags, and source metadata are included when
-available. `REVISAR` means evidence is insufficient for a defensible category;
-it is retained in the assessment and excluded from the schedule candidate
-list until reviewed.
+available. `REVISAR` means evidence is insufficient for a defensible category.
+It remains in the assessment; no priority category excludes a visible event
+from the schedule candidate list. Visibility controls inclusion, and priority
+only affects ordering.
 
 ## Categories and ordering
 
@@ -51,6 +69,12 @@ providers do not merge unrelated survey cadences.
 Visibility and brightness are feasibility fields. The nightly visibility
 table remains the source of per-night windows and is joined by target and
 night when producing a schedule. It does not alter the scientific category.
+
+The human-facing seasonal priority table currently omits the provisional
+`Rank` and `Order` columns while the prioritizer is being evaluated. The
+underlying assessment CSV retains rank/category fields for diagnostics and
+existing consumers; the assessment notebook hides both rank fields and shows
+the category and evidence needed to review each decision.
 
 ## Evidence sources
 

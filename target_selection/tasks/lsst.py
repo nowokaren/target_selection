@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from target_selection.sources import lsst as lsst_source
+from target_selection.lsst_optional import lsst_available
 
 
 def query_lsst_coverage(
@@ -20,6 +21,8 @@ def query_lsst_coverage(
     verbose: bool = True,
 ) -> pd.DataFrame:
     """Task: query LSST/Rubin visit coverage for targets."""
+    if not lsst_available(operation="Rubin visit coverage", verbose=verbose):
+        return pd.DataFrame(columns=["Target", "visitId", "expMidptMJD", "band", "detector"])
     if verbose:
         print(f"[lsst] Querying {data_release} coverage for {len(targets)} targets.", flush=True)
     coverage = lsst_source.query_visit_coverage(
@@ -53,6 +56,8 @@ def compute_lsst_photometry(
     verbose: bool = True,
 ) -> pd.DataFrame:
     """Task: get LSST/Rubin photometry by DIA catalog or forced measurement."""
+    if not lsst_available(operation="Rubin photometry", verbose=verbose):
+        return pd.DataFrame()
     photometry = lsst_source.compute_release_photometry(
         targets,
         coverage,

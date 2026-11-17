@@ -39,6 +39,18 @@ def _valid_photometry(data: pd.DataFrame) -> bool:
     return bool((timestamp.notna() & magnitude.notna()).any())
 
 
+def has_usable_cached_photometry(target_name: object, *, cache_dir: str | Path) -> bool:
+    """Check whether a target has a valid local MOP light curve."""
+    path = Path(cache_dir) / f"{_safe_target_name(target_name)}.csv"
+    if not path.exists():
+        return False
+    try:
+        data = pd.read_csv(path, usecols=["Timestamp", "Magnitude"])
+    except (OSError, ValueError):
+        return False
+    return _valid_photometry(data)
+
+
 def load_event_photometry(target, *, mop, cache_dir, refresh=False, legacy_cache_dir=None, verbose=True):
     """Fetch MOP photometry by name, with a positional fallback and CSV cache.
 

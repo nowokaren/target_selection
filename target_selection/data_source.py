@@ -121,8 +121,15 @@ class RubinHandle(ProviderHandle):
     @property
     def collection(self):
         if self._collection is None:
+            from .lsst_optional import lsst_available
+            if not lsst_available(operation=f"Rubin collection {self.collection_name}"):
+                return None
             from .collection_access import open_collection
-            self._collection = open_collection(self.collection_name)
+            try:
+                self._collection = open_collection(self.collection_name)
+            except ModuleNotFoundError as exc:
+                print(f"[rubin] Collection unavailable in this environment: {exc}", flush=True)
+                return None
         return self._collection
 
     def __call__(self, *, collection: str | None = None, **kwargs):
@@ -131,13 +138,16 @@ class RubinHandle(ProviderHandle):
         return self if collection is None or str(collection) == self.collection_name else RubinHandle(str(collection))
 
     def coverage(self, targets: pd.DataFrame, *, image_kinds=("individual", "coadd"), properties=(), bands=tuple("ugrizy"), output_path=None, **kwargs):
+        collection = self.collection
+        if collection is None:
+            return pd.DataFrame(columns=["target_id", "ra_deg", "dec_deg"])
         from .collection_access import load_collection_coverage, load_collection_coadds
-        result = load_collection_coverage(targets, collection=self.collection.profile, tap_service=self.collection.tap_service, bands=bands, **kwargs)
+        result = load_collection_coverage(targets, collection=collection.profile, tap_service=collection.tap_service, bands=bands, **kwargs)
         if "coadd" in image_kinds:
-            result = load_collection_coadds(result, collection=self.collection.profile, butler=self.collection.butler, bands=bands, **kwargs)
+            result = load_collection_coadds(result, collection=collection.profile, butler=collection.butler, bands=bands, **kwargs)
         if properties:
             positions = result[["target_id", "ra_deg", "dec_deg"]]
-            props = self.collection.get_property_map_values(positions, properties=properties, bands=bands)
+            props = collection.get_property_map_values(positions, properties=properties, bands=bands)
             result = result.merge(props, on="target_id", how="left")
         if output_path is not None:
             output = Path(output_path)
@@ -146,17 +156,21 @@ class RubinHandle(ProviderHandle):
         return result
 
     def get_image(self, targets, *, kind: str = "coadd", **kwargs):
-        return self.collection.get_image(targets, image_type=kind, **kwargs)
+        collection = self.collection
+        return None if collection is None else collection.get_image(targets, image_type=kind, **kwargs)
 
     def photometry(self, targets, *, coverage=None, method: str = "dia_forced_catalog", output_path=None, **kwargs):
+        collection = self.collection
+        if collection is None:
+            return pd.DataFrame()
         from .sources.lsst import compute_release_photometry
         result = compute_release_photometry(
             targets,
             coverage=coverage,
             method=method,
-            data_release=self.collection.profile,
-            tap_service=self.collection.tap_service,
-            butler=self.collection.butler,
+            data_release=collection.profile,
+            tap_service=collection.tap_service,
+            butler=collection.butler,
             **kwargs,
         )
         if output_path is not None:
@@ -215,6 +229,8 @@ def default_data_sources() -> DataSourceRegistry:
     registry.get("opm").photometry = opm.photometry
     registry.get("opm").login = opm.login
     registry.get("opm").private_targets = opm.private_targets
+    registry.get("opm").targets_in_visible_region = opm.targets_in_visible_region
+    registry.get("opm").public_candidate_targets = opm.public_candidate_targets
     registry.get("bhtom").login = bhtom.login
     registry.get("bhtom").photometry = bhtom.photometry
     return registry

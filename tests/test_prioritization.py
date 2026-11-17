@@ -3,12 +3,25 @@ import json
 import numpy as np
 import pandas as pd
 
-from target_selection.prioritization import PriorityConfig, evaluate_priority
+from target_selection.prioritization import PriorityConfig, build_priority_evidence, casleo_phase_coverage, classify_event_stage, criterion_supported_event, evaluate_priority
 from target_selection.planning import add_ogle_event_parameters
 
 
 def _jd(value: str) -> float:
     return float(pd.Timestamp(value, tz="UTC").to_julian_date())
+
+
+def test_supported_event_criterion_uses_configured_rise_threshold():
+    row = pd.Series({"target_id": "candidate-without-label"})
+    metrics = {
+        "t0_hjd": np.nan, "tE_days": np.nan,
+        "rise_significance_sigma": 4.0, "rise_points": 3,
+    }
+
+    assert criterion_supported_event(row, metrics, PriorityConfig(rise_significance_sigma=5.0)) == (
+        "REVISAR", "faltan etiqueta o datos suficientes para confirmar microlensing",
+    )
+    assert criterion_supported_event(row, metrics, PriorityConfig(rise_significance_sigma=3.0)) is None
 
 
 def test_evaluate_priority_assigns_categories_from_evidence_and_orders(tmp_path):
@@ -18,7 +31,7 @@ def test_evaluate_priority_assigns_categories_from_evidence_and_orders(tmp_path)
         {"target_id": "OGLE-2026-BLG-1001", "event_peak_hjd": now + 12, "event_duration_days": 30, "u0": 0.2, "magnitude_last": 15.8},
         {"target_id": "OGLE-2026-BLG-1002", "event_peak_hjd": now, "event_duration_days": 30, "u0": 0.05, "magnitude_last": 16.0},
         {"target_id": "OGLE-2026-BLG-1003", "event_peak_hjd": now, "event_duration_days": 30, "u0": 0.1, "magnitude_last": 15.5},
-        {"target_id": "ZTF-LPV", "classification": "long period variable", "magnitude_last": 15.0},
+        {"target_id": "ZTF-no-data", "classification": "unclassified", "magnitude_last": 15.0},
         {"target_id": "unknown", "magnitude_last": 16.0},
     ])
     observations = pd.DataFrame([
@@ -41,7 +54,7 @@ def test_evaluate_priority_assigns_categories_from_evidence_and_orders(tmp_path)
     assert assessed.loc["OGLE-2026-BLG-1001", "priority_category"] == "NUEVO-RISE"
     assert assessed.loc["OGLE-2026-BLG-1002", "priority_category"] == "NUEVO-PEAK"
     assert assessed.loc["OGLE-2026-BLG-1003", "priority_category"] == "CONTINUIDAD"
-    assert "ZTF-LPV" not in assessed.index
+    assert "ZTF-no-data" not in assessed.index
     assert "unknown" not in assessed.index
     assert assessed.loc["OGLE-2026-BLG-1001", "rise_significance_sigma"] > 3
     assert assessed.loc["OGLE-2026-BLG-1003", "maximum_magnification"] > 5
@@ -49,7 +62,7 @@ def test_evaluate_priority_assigns_categories_from_evidence_and_orders(tmp_path)
     assert assessed.loc["OGLE-2026-BLG-1001", "priority_rank"] < assessed.loc["OGLE-2026-BLG-1002", "priority_rank"]
     assert (tmp_path / "priority_assessment.csv").exists()
     discarded = pd.read_csv(tmp_path / "priority_discarded_no_photometry.csv")
-    assert {"unknown", "ZTF-LPV"}.issubset(set(discarded.target_id))
+    assert {"unknown", "ZTF-no-data"}.issubset(set(discarded.target_id))
     run_config = json.loads((tmp_path / "priority_config.json").read_text())
     assert run_config["priority_config"]["rise_significance_sigma"] == 3.0
     assert run_config["as_of_utc"].startswith(as_of)
@@ -71,6 +84,33 @@ def test_casleo_phase_coverage_is_used_without_inventing_photometry():
     assert row.n_casleo_photometry == 0
     assert row.n_casleo_coverage_points == 4
     assert row.casleo_phases == ["peak"]
+
+
+def test_finished_casleo_event_needs_measured_baseline_to_discard():
+    now = _jd("2026-10-16")
+    target = pd.DataFrame([{
+        "target_id": "OGLE-2025-BLG-0681", "t0_hjd": now - 90,
+        "tE_days": 30, "event_status": "finished",
+    }])
+    images = pd.DataFrame([{
+        "Target": target.iloc[0].target_id, "provider": "HSH",
+        "mjd": now - 2_400_000.5 - 1, "usable": 1,
+    }])
+    coverage = casleo_phase_coverage(target, images)
+    external = pd.DataFrame([{
+        "target_id": target.iloc[0].target_id, "epoch_hjd": now - 5,
+        "magnitude": 16.0, "survey": "OGLE", "band": "I",
+    }])
+    image_only = evaluate_priority(target, external, casleo_coverage=coverage, as_of="2026-10-16").iloc[0]
+    measured = evaluate_priority(target, pd.concat([external, pd.DataFrame([{
+        "target_id": target.iloc[0].target_id, "epoch_hjd": now - 1,
+        "magnitude": 16.1, "survey": "HSH", "band": "I",
+    }])]), casleo_coverage=coverage, as_of="2026-10-16").iloc[0]
+
+    assert coverage.loc[0, "hsh_post_baseline_n"] == 1
+    assert image_only.priority_category == "REVISAR"
+    assert image_only.n_casleo_photometry == 0
+    assert measured.priority_category == "DESCARTAR"
 
 
 def test_visibility_changes_feasibility_not_scientific_category():
@@ -160,3 +200,27 @@ def test_empty_assessment_still_writes_a_reproducible_schema(tmp_path):
     assert "priority_category" in empty
     assert (tmp_path / "priority_assessment.csv").exists()
     assert (tmp_path / "priority_config.json").exists()
+
+
+def test_build_priority_evidence_keeps_targets_without_usable_photometry():
+    targets = pd.DataFrame([{"target_id": "no-data", "ra_deg": 10.0, "dec_deg": -20.0}])
+    evidence = build_priority_evidence(
+        targets, pd.DataFrame(), as_of="2026-10-16",
+    )
+
+    assert evidence.target_id.tolist() == ["no-data"]
+    assert evidence.loc[0, "n_photometry"] == 0
+    assert "priority_category" not in evidence
+
+
+def test_event_stage_boundaries_are_visible_and_reproducible():
+    config = PriorityConfig()
+    cases = [
+        (79.0, "pre_baseline"), (80.0, "rise"), (97.0, "peak"),
+        (103.0, "peak"), (104.0, "decline"), (120.0, "decline"),
+        (121.0, "post_baseline"),
+    ]
+
+    assert [classify_event_stage(100.0, 10.0, now, config)[0] for now, _ in cases] == [
+        stage for _, stage in cases
+    ]

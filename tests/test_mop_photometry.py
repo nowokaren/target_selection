@@ -4,6 +4,7 @@ from target_selection.mop_photometry import (
     prepare_lightcurve_data, select_lightcurve_filters,
     split_mop_candidates_without_event_data, normalize_photometry_provenance, load_event_photometry,
 )
+from target_selection.sources.mop import load_event_data
 
 
 def test_filter_priority_prefers_ogle_i_and_g():
@@ -66,3 +67,15 @@ def test_mop_provenance_fills_telescope_from_survey():
     }))
     assert result.loc[0, "Telescope"] == "OGLE"
     assert result.loc[0, "Provider"] == "MOP"
+
+
+def test_mop_event_parameters_map_u_0_alias():
+    class Client:
+        def enrich_microlensing_parameters(self, targets, **kwargs):
+            return pd.DataFrame({"target_id": ["event"], "mop_u_0": [0.23]})
+
+    result = load_event_data(
+        pd.DataFrame({"target_id": ["event"]}), client=Client(), fields=("u0",),
+    )
+
+    assert result.loc[0, "u0"] == 0.23

@@ -6,7 +6,8 @@ file.
 """
 
 from .targets import collect_mop_targets, load_target_list, merge_targets, restrict_targets
-from .surveys import import_hsh_inventory, observed_targets
+from .surveys import (import_hsh_inventory, observed_targets, load_observed_survey_targets,
+                      observed_survey_epochs, update_observed_survey_target_catalog)
 from .visibility import evaluate_visibility, save_visibility_plots, make_visibility_sequence
 from .lsst import query_lsst_coverage, compute_lsst_photometry, save_lsst_photometry
 from .reports import create_target_report, create_target_reports, create_lightcurve_plots, create_lightcurves_report
@@ -14,6 +15,9 @@ from .reports import create_target_report, create_target_reports, create_lightcu
 __all__ = [
     "observed_targets",
     "import_hsh_inventory",
+    "load_observed_survey_targets",
+    "observed_survey_epochs",
+    "update_observed_survey_target_catalog",
     "collect_mop_targets",
     "load_target_list",
     "merge_targets",

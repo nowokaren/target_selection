@@ -18,11 +18,34 @@ from target_selection.sources.normalization import (
 )
 
 
-def _required_path(spec: SourceSpec, key: str = "path") -> Path:
+def _source_path(spec: SourceSpec, key: str, *, sibling_to: str | None = None) -> Path:
     value = spec.options.get(key)
     if not value:
         raise ValueError(f"Source {spec.name!r} requires the {key!r} option")
     path = Path(str(value)).expanduser()
+    if not path.is_absolute():
+        candidates = []
+        if sibling_to and spec.options.get(sibling_to):
+            sibling = Path(str(spec.options[sibling_to])).expanduser()
+            if not sibling.is_absolute():
+                config_dir = Path(str(spec.options.get("config_dir", Path.cwd())))
+                roots = (*config_dir.parents, config_dir, Path.cwd())
+                sibling = next(
+                    (root / sibling for root in roots if (root / sibling).exists()),
+                    Path.cwd() / sibling,
+                )
+            candidates.append(sibling.parent / path)
+        config_dir = spec.options.get("config_dir")
+        if config_dir:
+            config_dir = Path(str(config_dir)).expanduser()
+            candidates.extend(root / path for root in (config_dir, *config_dir.parents))
+        candidates.append(Path.cwd() / path)
+        path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    return path
+
+
+def _required_path(spec: SourceSpec, key: str = "path") -> Path:
+    path = _source_path(spec, key)
     if not path.exists():
         raise FileNotFoundError(f"Source {spec.name!r} file does not exist: {path}")
     return path
@@ -74,7 +97,7 @@ def _import_photometry_if_configured(
     value = spec.options.get("photometry_path")
     if not value:
         return 0
-    path = Path(str(value)).expanduser()
+    path = _source_path(spec, "photometry_path", sibling_to="inventory_path")
     if not path.exists():
         raise FileNotFoundError(
             f"Photometry file does not exist for {spec.name!r}: {path}"

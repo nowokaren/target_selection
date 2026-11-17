@@ -15,6 +15,7 @@ from typing import Iterable
 import pandas as pd
 
 from target_selection.data_release_config import DataReleaseConfig, get_data_release
+from target_selection.lsst_optional import lsst_available
 
 
 SUPPORTED_PHOTOMETRY_METHODS = {"coadd_forced", "dia_forced_catalog", "dia_source_catalog", "dia_combined_catalog", "calexp_forced"}
@@ -35,6 +36,8 @@ def resolve_data_release(data_release: str | DataReleaseConfig = "DP2", *, photo
 
 def create_tap_service(data_release: str | DataReleaseConfig = "DP2"):
     """Create the Rubin RSP TAP client for one data release."""
+    if not lsst_available(operation="Rubin TAP access"):
+        raise RuntimeError("Rubin TAP access is unavailable without the LSST/Rubin client packages.")
     release = get_data_release(data_release)
     from lsst.rsp import RSPDiscovery
 
@@ -43,6 +46,8 @@ def create_tap_service(data_release: str | DataReleaseConfig = "DP2"):
 
 def create_butler(data_release: str | DataReleaseConfig = "DP2"):
     """Create a Butler configured for one Rubin data release/collection."""
+    if not lsst_available(operation="Rubin Butler access"):
+        raise RuntimeError("Rubin Butler access is unavailable without the LSST/Rubin client packages.")
     release = get_data_release(data_release)
     from lsst.daf.butler import Butler
 

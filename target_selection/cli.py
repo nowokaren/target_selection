@@ -92,6 +92,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Keyring credentials removed for {args.provider}.")
             return 0
     if args.command == "catalog":
+        from target_selection.lsst_optional import lsst_available
+        if not lsst_available(operation="Rubin catalog enrichment"):
+            return 2
         config = load_reference_catalog_config(args.config)
         result = run_reference_catalog(config)
         print(result.catalog_path)

@@ -8,7 +8,11 @@ import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astropy.visualization import ImageNormalize, AsinhStretch
 from astropy.visualization.wcsaxes import SphericalCircle
-from lsst.daf.butler import EmptyQueryResultError
+try:
+    from lsst.daf.butler import EmptyQueryResultError
+except ModuleNotFoundError:  # Rubin is optional outside the RSP environment.
+    class EmptyQueryResultError(Exception):
+        pass
 
 from target_selection.mop_photometry import prepare_lightcurve_data, select_lightcurve_filters
 from target_selection.release_photometry import prepare_release_lightcurve_data, prepare_release_psf_lightcurve_data

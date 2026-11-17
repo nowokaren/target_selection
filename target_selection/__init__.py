@@ -20,8 +20,8 @@ from .catalog_matching import add_match_flag, cached_crossmatch, crossmatch_lsdb
 from .catalog_products import describe_dp2_products, match_dp2_catalog, open_dp2_hats_catalog
 from .quality import apply_coadd_quality_flags
 from .reporting import numeric_series, plot_collection_distributions, write_collection_summaries
-from .planning import (load_candidates, add_ogle_event_parameters, collect_photometry, load_provider_targets, collect_provider_photometry, apply_magnitude_limit,
-                       evaluate_visibility, visibility_plots, summarize_visibility, save_visibility_products, save_target_sky_map,
+from .planning import (load_candidates, add_ogle_event_parameters, add_mop_event_parameters, collect_photometry, load_provider_targets, collect_provider_photometry, apply_magnitude_limit,
+                       merge_candidate_targets, build_pipeline_audit, evaluate_visibility, visibility_plots, summarize_visibility, save_visibility_products, save_target_sky_map,
                        save_priority_products, save_planning_pdf)
 from .prioritization import PriorityConfig, SCHEDULABLE_CATEGORIES, evaluate_priority
 from .rsp_access import (
@@ -56,6 +56,9 @@ from .tasks import (
     create_lightcurves_report,
     import_hsh_inventory,
     observed_targets,
+    load_observed_survey_targets,
+    observed_survey_epochs,
+    update_observed_survey_target_catalog,
 )
 
 from .reference_catalog import (
@@ -72,6 +75,9 @@ from .reference_catalog import (
 
 __all__ = [
     "observed_targets",
+    "load_observed_survey_targets",
+    "observed_survey_epochs",
+    "update_observed_survey_target_catalog",
     "import_hsh_inventory",
     "create_lightcurves_report",
     "create_target_reports",
@@ -122,7 +128,10 @@ __all__ = [
     "load_provider_targets",
     "collect_provider_photometry",
     "load_candidates",
+    "merge_candidate_targets",
+    "build_pipeline_audit",
     "add_ogle_event_parameters",
+    "add_mop_event_parameters",
     "collect_photometry",
     "apply_magnitude_limit",
     "save_visibility_products",

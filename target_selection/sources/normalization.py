@@ -22,9 +22,9 @@ OBSERVATION_ALIASES = {
 }
 PHOTOMETRY_ALIASES = {
     "target": "Target", "name": "Target", "object": "Target",
-    "target_name": "Target", "mjd": "mjd", "filter": "band",
+    "target_name": "Target", "mjd": "mjd", "mjd_obs": "mjd", "mjd-obs": "mjd", "filter": "band",
     "filter_name": "band", "magnitude": "magnitude", "mag": "magnitude",
-    "error": "magnitude_error", "mag_error": "magnitude_error",
+    "error": "magnitude_error", "mag_err": "magnitude_error", "mag_error": "magnitude_error",
     "magnitude_error": "magnitude_error", "flux": "flux",
     "flux_error": "flux_error", "timestamp": "Timestamp", "date": "Timestamp",
     "point_id": "point_id",

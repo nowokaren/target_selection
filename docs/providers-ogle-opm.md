@@ -55,22 +55,39 @@ Sources: [OGLE EWS](https://ogle.astrouw.edu.pl/ogle4/ews/ews.html) and the
 
 ## OPM
 
-The public OPM ranking page exposes target name, broker links, latest magnitude
-and band, coordinates, several probability/variability scores and an update
-time. The general target list and individual targets require login.
+The seasonal planner checks both OPM curated candidate lists on every run:
+the [ranked microlensing targets](https://lensingtom.zah.uni-heidelberg.de/ranked-microlensing-targets/)
+and [new and active targets](https://lensingtom.zah.uni-heidelberg.de/new_and_active_targets).
+The first list includes target coordinates; the second is enriched from each
+linked target page. List provenance and available page classifications are
+retained with the candidate records. The regional target API query remains in place,
+and candidates from all three OPM sources are merged before visibility is
+evaluated. The curated pages are refreshed each run; the more expensive
+overlapping-cone query continues to use the daily query cache.
 
-The implemented public feature is:
+The seasonal planner queries the OPM Target API with the standard
+`cone_search=RA,Dec,radius` filter. It builds overlapping cones around the
+zenith track during each configured observing window, retrieves the OPM
+targets in that conservative region, then applies the exact local CASLEO
+visibility criteria. This may include targets outside the final visibility
+cut, which are removed by the local calculation.
+
+The public ranking remains available for inspection:
 
 ```python
 ranking = data_source.opm.ranking()
 ```
 
-The authenticated session is prepared but the private target/observation
-parser remains intentionally pending inspection with an authorized account:
+The target-region query and individual-target photometry use an authenticated
+OPM session:
 
 ```python
 session = data_source.opm.login()
 ```
+
+Photometry is read only from the `photometry_data` Plotly payload in a target
+page. OPM pages also embed classification and observation-planning plots; their
+time-series arrays are not photometric measurements.
 
 For persistent, cross-platform setup, install the optional credentials
 dependency and run:
@@ -83,7 +100,12 @@ target-selection auth test opm
 
 The default backend is the operating-system credential store through
 `keyring`. On a headless server without a usable keyring backend, use the
-environment variables or `.netrc` fallback. Credentials are never stored in
-the repository or in a notebook.
+`.netrc` fallback instead:
+
+```bash
+target-selection auth set opm --backend netrc
+```
+
+Credentials are never stored in the repository or in a notebook.
 
 Source: [Galactic Science OPM](https://lensingtom.zah.uni-heidelberg.de/).

@@ -15,7 +15,7 @@ DOT = r'''digraph priority {
   edge [color="#52677A", penwidth=1.2, arrowsize=0.75, fontname="DejaVu Sans", fontsize=9, fontcolor="#40566B"];
 
   start [label="Target candidato", fillcolor="#F1F3F5", fontstyle=bold];
-  event_state [shape=diamond, style=filled, label="¿Terminado o LPV/variable confirmada?\nVer: curva reciente y clasificación", fillcolor="#EAF3FA"];
+  event_state [shape=diamond, style=filled, label="¿El evento terminó?\nVer: estado reportado", fillcolor="#EAF3FA"];
   plausible [shape=diamond, style=filled, label="¿Microlensing plausible?\nVer: forma, significancia de la subida, otros surveys", fillcolor="#EAF3FA"];
   has_casleo [shape=diamond, style=filled, label="¿CASLEO tiene cobertura útil?\nVer: épocas/filtros y fases cubiertas", fillcolor="#EAF3FA"];
 

@@ -8,7 +8,7 @@ This is the first-pass decision process used by `evaluate_priority` for HSH/JS m
 
 ## Scientific decision path
 
-1. **Establish the event state from data.** Check current survey photometry and classifications to determine whether the event has ended, is consistent with a long-period or other variable, or is changing too slowly for the planned cadence. These are evidence-based reasons for `DESCARTAR`; a baseline visit remains possible when it answers a specific question.
+1. **Establish the event state from data.** Check current survey photometry and event status to determine whether the event has ended or is changing too slowly for the planned cadence. A baseline visit remains possible when it answers a specific question.
 2. **Check microlensing evidence.** Look at the shape and significance of the measured rise, agreement between available surveys, and competing classifications. A broker score by itself is not enough.
 3. **Separate new targets from CASLEO follow-up.** For a new event, require a clear rise before assigning `NUEVO-RISE` or `NUEVO-PEAK`. If the evidence is plausible but the curve is stale, one `DIAGNÓSTICO` visit may establish its current state. For an event already observed by CASLEO, prefer a visit that adds a phase or a measurable change. The raw number of prior acquisitions is not a reason by itself to observe again.
 4. **Use the observing gap carefully.** Missing recent survey data can justify one diagnostic measurement when there is credible prior evidence that the event was active. It does not make a flat or already rejected variable a microlensing target.
@@ -19,7 +19,7 @@ The numbers below are the quantities to inspect or calculate. Their cutoffs are 
 
 | Decision block | Metric or verification | How to use it |
 | --- | --- | --- |
-| Event state | Latest same-band measurements and dates; OGLE event page/status where applicable; survey classification; predicted `Δm` over the planned visit interval compared with the expected photometric error. | Mark completed events as finished. Flag LPV/other-variable classifications for review. Treat a change as too slow to measure when predicted `Δm` is below the empirical repeat-measurement uncertainty. Set the threshold from HSH/JS data. |
+| Event state | Latest same-band measurements and dates; OGLE event page/status where applicable; survey classification; predicted `Δm` over the planned visit interval compared with the expected photometric error. | Mark explicitly completed events as finished. Treat a change as too slow to measure when predicted `Δm` is below the empirical repeat-measurement uncertainty. Set the threshold from HSH/JS data. |
 | Microlensing plausible? | Light-curve morphology; significance of the rise relative to point scatter; consistency across available surveys; competing variable classifications. | Use the curve and its uncertainty, not a broker label alone. Define required significance, point count, and cross-survey agreement after reviewing examples. |
 | CASLEO coverage useful? | Number and dates of usable epochs/images, filters, available photometric uncertainties, and which event phases they cover (baseline, rise, peak, decline). | Judge whether another visit adds a phase or fills a meaningful gap. Image counts are labeled as coverage; they are not treated as photometric measurements or used as error estimates. |
 | Clear rise? | Fitted slope and its uncertainty over a stated time interval; number of consecutive measurements consistent with brightening; corroboration by another survey. | Establish the interval, significance, and minimum points from real light curves. This gate is for new events before assigning `NUEVO-RISE` or `NUEVO-PEAK`. |
@@ -41,7 +41,7 @@ For repeat observations, calculate `Δm = |m(t + Δt) − m(t)|` from recent sam
 | `DIAGNÓSTICO` | One measurement to establish the present state because the event is plausible but recent external data are missing. |
 | `OPORTUNISTA` | A plausible event in decline, or a specific lower-priority measurement such as a baseline check that answers a stated question. |
 | `REVISAR` | Evidence is incomplete or conflicts, so the evaluator leaves the scientific classification open for team review. It is not included in the schedule candidate list automatically. |
-| `DESCARTAR` | Explicitly finished or classified as a non-microlensing variable, in post-event baseline, or a repeat that adds no phase or measurable change. Brightness and nightly visibility are handled separately as feasibility. |
+| `DESCARTAR` | Explicitly finished, in post-event baseline, or a repeat that adds no phase or measurable change. Brightness and nightly visibility are handled separately as feasibility. |
 
 The evaluator orders categories as `NUEVO-RISE`, `NUEVO-PEAK`, `CONTINUIDAD`, `DIAGNÓSTICO`, `OPORTUNISTA`, `REVISAR`, `DESCARTAR`. Within a category it sorts by a stated metric: rise significance, distance from modeled peak, predicted change relative to the HSH/JS measurement uncertainty, age of external data, or latest magnitude. Ties use `target_id` for deterministic output.
 

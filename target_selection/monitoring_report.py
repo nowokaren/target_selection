@@ -92,11 +92,26 @@ def _target_has_source(target: pd.Series, source: str) -> bool:
     """Return whether a target is associated with a named data source."""
     wanted = str(source).strip().casefold()
     values = []
-    for column in ("source_providers", "input_sources", "provider", "target_source"):
+    for column in (
+        "source_providers", "input_sources", "provider", "target_source",
+        "photometry_toms", "tom_source", "photometry_sources",
+    ):
         value = target.get(column, "")
         if pd.notna(value):
             values.extend(str(value).replace(";", ",").split(","))
     return wanted in {item.strip().casefold() for item in values if item.strip()}
+
+
+def _group_by_target(frame: pd.DataFrame | None) -> dict[str, pd.DataFrame]:
+    """Group a report input by either its public target column spelling."""
+    if frame is None or frame.empty:
+        return {}
+    column = "Target" if "Target" in frame else "target_id" if "target_id" in frame else None
+    if column is None:
+        return {}
+    work = frame.rename(columns={column: "Target"}).copy()
+    work["Target"] = work["Target"].astype(str)
+    return {name: group for name, group in work.groupby("Target", sort=False)}
 def _nominal_parameter(value: object) -> float:
     """Extract a numerical parameter value from MOP value±uncertainty text."""
     match = re.search(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", str(value))
@@ -194,13 +209,22 @@ def _last_magnitude_label(target: pd.Series) -> str:
     return f" (last mag={float(value):.2f}{f', {band}' if band else ''})"
 
 
+def _truthy_flag(value: object) -> bool:
+    """Interpret nullable flags without treating NaN or the string 'False' as true."""
+    if pd.isna(value):
+        return False
+    if isinstance(value, str):
+        return value.strip().casefold() in {"true", "1", "yes", "y"}
+    return bool(value)
+
+
 def _plot_provider_photometry(ax, data: pd.DataFrame, provider: str) -> tuple[list[object], bool]:
     """Plot provider photometry with a distinct marker and color per band."""
     if data.empty:
         return [], False
     style = PROVIDER_STYLES[provider]
     groups = sorted(
-        (str(telescope).strip().replace(" ", "_"), str(band).strip().replace(" ", "_"))
+        (str(telescope).strip(), str(band).strip())
         for telescope, band in data[["Telescope", "Filter"]].fillna("").drop_duplicates().itertuples(index=False, name=None)
     )
     markers = ("o", "s", "^", "D", "v", "P", "X", "<", ">")
@@ -217,16 +241,17 @@ def _plot_provider_photometry(ax, data: pd.DataFrame, provider: str) -> tuple[li
         errors = subset["Error"].to_numpy(float)
         yerr = np.where(np.isfinite(errors) & (errors >= 0), errors, np.nan)
         color = palette(index % 10) if len(groups) > 1 else style["color"]
-        telescope_label = telescope
+        telescope_label = telescope.replace(" ", "_")
+        band_label = band.replace(" ", "_")
         if (
-            telescope_label.casefold() == band.casefold()
-            or band.casefold().startswith(f"{telescope_label.casefold()}_")
+            telescope_label.casefold() == band_label.casefold()
+            or band_label.casefold().startswith(f"{telescope_label.casefold()}_")
         ):
             telescope_label = ""
         if provider in {"HSH", "JS"}:
-            label = f"{provider} photometry {band}"
+            label = f"{provider} photometry {band_label}"
         else:
-            label = f"{provider} {telescope_label}_{band}" if telescope_label else f"{provider} {band}"
+            label = f"{provider} {telescope_label}_{band_label}" if telescope_label else f"{provider} {band_label}"
         handle = ax.errorbar(
             dates, subset["Magnitude"].to_numpy(float), yerr=yerr,
             fmt=markers[index % len(markers)], ms=3.2,
@@ -378,13 +403,22 @@ def plot_monitoring_lightcurve(
                 handle.set_label(coverage_layer["label"])
             handles.append(handle)
 
-    visible = bool(target.get("is_mop_visible_in_run", False))
-    observed = bool(target.get("is_previously_observed", False))
+    visible = _truthy_flag(target.get("is_mop_visible_in_run", False))
+    observed = _truthy_flag(target.get("is_previously_observed", False))
     status = ", ".join(label for label, value in (("MOP visible", visible), ("previously observed", observed)) if value) or "registry target"
+    sources = target.get("source_providers", target.get("provider", ""))
+    sources = "" if pd.isna(sources) else ", ".join(
+        sorted({name.strip().upper() for name in str(sources).split(",") if name.strip()})
+    )
+    if sources:
+        status += f"; source: {sources}"
     te = target.get("mop_t_e_days", np.nan)
     t0 = target.get("mop_t_0_hjd", np.nan)
     parameter_text = "; ".join(f"{label}={value}" for label, value in (("t_E", te), ("t_0", t0)) if pd.notna(value))
     default_title = f"{name} — {status}" + (f" — {parameter_text}" if parameter_text else "") + _last_magnitude_label(target)
+    casleo_summary = target.get("casleo_observations_label", "")
+    if pd.notna(casleo_summary) and str(casleo_summary).strip():
+        default_title += f" — CASLEO: {casleo_summary}"
     ax.set_title(default_title if title is None else title, fontsize=9)
     if handles and show_legend:
         ax.legend(handles=handles, loc="best", fontsize=7, frameon=False, ncol=min(3, len(handles)))
@@ -430,14 +464,10 @@ def create_monitoring_lightcurve_plots(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     selected_layers = normalize_monitoring_layers(layers)
-    release_groups = ({name: group for name, group in release_photometry.groupby("Target", sort=False)}
-                      if release_photometry is not None and not release_photometry.empty and "Target" in release_photometry else {})
-    coverage_groups = ({name: group for name, group in lsst_coverage.groupby("Target", sort=False)}
-                       if lsst_coverage is not None and not lsst_coverage.empty and "Target" in lsst_coverage else {})
-    epoch_groups = ({name: group for name, group in observatory_epochs.groupby("Target", sort=False)}
-                    if observatory_epochs is not None and not observatory_epochs.empty and "Target" in observatory_epochs else {})
-    local_groups = ({name: group for name, group in observatory_photometry.groupby("Target", sort=False)}
-                    if observatory_photometry is not None and not observatory_photometry.empty and "Target" in observatory_photometry else {})
+    release_groups = _group_by_target(release_photometry)
+    coverage_groups = _group_by_target(lsst_coverage)
+    epoch_groups = _group_by_target(observatory_epochs)
+    local_groups = _group_by_target(observatory_photometry)
     loader = lambda target: load_event_photometry(target, mop=mop, cache_dir=mop_photometry_dir, verbose=verbose)
     paths: list[Path] = []
     records = _sort_targets_by_mag_now(targets)
@@ -458,11 +488,9 @@ def create_monitoring_lightcurve_plots(
         if path.exists() and not overwrite:
             continue
         figure, axis = plt.subplots(figsize=(10, 4.2))
-        mop_points = (
-            loader(target)
-            if "mop_photometry" in selected_layers and _target_has_source(target, "mop")
-            else pd.DataFrame()
-        )
+        mop_points = _provider_photometry_points(local_groups.get(name), "MOP")
+        if mop_points.empty and "mop_photometry" in selected_layers and _target_has_source(target, "mop"):
+            mop_points = loader(target)
         plot_monitoring_lightcurve(
             target, mop_points,
             release_photometry=release_groups.get(name), lsst_coverage=coverage_groups.get(name),

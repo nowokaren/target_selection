@@ -208,6 +208,8 @@ inventory_path = "data/hsh_data/image_collection_astro.csv"
 
 `inventory_path` points to the HSH astrometric image inventory. An optional
 `photometry_path` may point to normalized target photometry.
+Relative photometry filenames are resolved beside the inventory; input paths
+can also be relative to the TOML file or project root.
 
 ### Normalized CSV survey
 
@@ -219,6 +221,13 @@ and either magnitude or flux data. Use `inventory_column_map` and
 `photometry_column_map` for nonstandard CSV headers. See
 [Adding a source](adding_sources.md#normalized-columns-and-configurable-maps)
 for the complete canonical schemas and examples.
+
+The seasonal-plan CLI accepts this run configuration with
+`target-selection plan --config path/to/run.toml`. Provider-specific settings
+belong under `[target_providers.<name>]`: BHTOM supports `classification`,
+`query`, `max_pages`, and `base_url`; OPM supports `minimum_altitude_deg`,
+`observing_windows`, `sample_minutes`, `base_url`, and `timeout`. Command-line values
+override the matching run dates, observatory, output, and visibility settings.
 
 ## Built-in reference adapter
 

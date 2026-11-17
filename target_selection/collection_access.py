@@ -94,6 +94,9 @@ def query_visit_centers_by_band(
 
 def open_collection(name: str | DataReleaseConfig = "DP2") -> CollectionContext:
     """Open the TAP and Butler clients described by a collection profile."""
+    from .lsst_optional import lsst_available
+    if not lsst_available(operation=f"Rubin collection {name}"):
+        raise RuntimeError("Rubin collection access is unavailable without the LSST/Rubin client packages.")
     from lsst.daf.butler import Butler
     from lsst.rsp import get_tap_service
 

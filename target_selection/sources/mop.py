@@ -88,7 +88,7 @@ def load_event_data(
         "magnitude_last": ("mop_mag_now", "mop_mag_last", "mag_now", "mag_last", "magnitude_last"),
         "tE_days": ("mop_te_days", "mop_t_e_days", "tE_days", "event_duration_days"),
         "t0_hjd": ("mop_t0_hjd", "mop_t_0_hjd", "t0_HJD", "event_peak_hjd"),
-        "u0": ("mop_u0", "u0"),
+        "u0": ("mop_u0", "mop_u_0", "u0"),
     }
     legacy_aliases = {
         "magnitude": "magnitude_last",

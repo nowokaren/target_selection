@@ -270,4 +270,25 @@ def load_config(path: str | Path) -> AnalysisConfig:
             values = json.loads(stream.read().decode("utf-8"))
         else:
             raise ValueError("Configuration files must use .toml or .json")
-    return AnalysisConfig.from_mapping(values)
+    config = AnalysisConfig.from_mapping(values)
+    config_dir = path.expanduser().resolve().parent
+
+    def add_config_dir(specs: Mapping[str, SourceSpec]) -> dict[str, SourceSpec]:
+        result = {}
+        for name, spec in specs.items():
+            options = dict(spec.options)
+            options.setdefault("config_dir", str(config_dir))
+            result[name] = SourceSpec(
+                spec.name, spec.adapter, spec.enabled, spec.label,
+                spec.capabilities, options,
+            )
+        return result
+
+    return AnalysisConfig(
+        **{
+            **config.__dict__,
+            "provider_specs": add_config_dir(config.provider_specs),
+            "followup_specs": add_config_dir(config.followup_specs),
+            "reference_specs": add_config_dir(config.reference_specs),
+        }
+    )
