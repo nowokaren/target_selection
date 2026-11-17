@@ -35,7 +35,7 @@ collection.get_image(image_type="coadd", ...)
 
 The module-level functions remain as compatibility wrappers. `get_image` accepts the semantic types `coadd`, `visit`, `raw_visit`, and `diff`; dataset names are resolved from the selected collection.
 
-The complete walkthrough is available as a [Jupyter notebook](notebooks/rsp_access_examples.ipynb).
+The complete walkthrough is available as a [Jupyter notebook](../notebooks/tutorials/rsp_access_examples.ipynb).
 
 ## Image terminology
 

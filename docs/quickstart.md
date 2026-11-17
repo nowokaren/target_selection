@@ -18,7 +18,7 @@ Reusable downloads and query results live in the shared `outputs/cache/` tree. P
 
 ## Run individual tasks
 
-For interactive work, use `notebooks/task_api_examples.ipynb` or call the functions in `target_selection.tasks` directly. The seasonal notebook is `notebooks/seasonal_observing_plan.ipynb`. See the [notebook inventory](usage-notebooks.md).
+For interactive work, use `notebooks/tutorials/task_api_examples.ipynb` or call the functions in `target_selection.tasks` directly. The seasonal notebook is `notebooks/workflows/seasonal_observing_plan.ipynb`. See the [notebook inventory](usage-notebooks.md).
 
 ## Rubin catalog enrichment
 

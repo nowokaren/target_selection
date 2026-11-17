@@ -5,16 +5,16 @@ complete MOP event catalog with Rubin DP2.
 
 ## Notebooks
 
-- `notebooks/00_mop_snapshot_and_enrichment.ipynb`,
-  `notebooks/01_mop_dp2_coverage_and_reports.ipynb` and
-  `notebooks/02_explore_mop_dp2_matches.ipynb` build the MOP–DP2 coverage and
+- `notebooks/analysis/mop_dp2/00_mop_snapshot_and_enrichment.ipynb`,
+  `notebooks/analysis/mop_dp2/01_mop_dp2_coverage_and_reports.ipynb` and
+  `notebooks/analysis/mop_dp2/03_explore_mop_dp2_matches.ipynb` build the MOP–DP2 coverage and
   report products.
-- `notebooks/01_lsdb_hats_mop_dp2_comparison.ipynb` matches the MOP targets
+- `notebooks/analysis/mop_dp2/02_lsdb_hats_mop_dp2_comparison.ipynb` matches the MOP targets
   against DP2 HATS catalogs with the reusable `target_selection` API.
 
-The LSDB/HATS outputs are written below `outputs/lsdb_hats/`. These are
-reproducible analysis products and remain local (the repository ignores
-`outputs/`).
+MOP–DP2 run tables are written under `outputs/mop_dp2_all/`. LSDB/HATS
+products and retained reports live under `outputs/analyses/mop_dp2/`. Both are
+under the single root `outputs/`, are generated locally, and remain outside Git.
 
 ## Environment
 

@@ -18,7 +18,7 @@ are `criterion_ended_event`, `criterion_supported_event`,
 `criterion_rising_event`, `criterion_peak_event`, `criterion_stale_photometry`,
 `criterion_declining_event`, `criterion_unknown_event_stage`, and
 `criterion_fallback`. `PriorityConfig` exposes the thresholds and windows they
-use. The offline `notebooks/priority_assessment.ipynb` has one switchable cell
+use. The offline `notebooks/analysis/priority_assessment.ipynb` has one switchable cell
 per criterion, shows its evidence and decision for every target, and ends with
 a comparison to `evaluate_priority` as currently implemented.
 

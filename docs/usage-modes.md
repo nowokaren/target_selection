@@ -6,7 +6,7 @@ Use `target-selection-plan` or `python -m target_selection.planning_cli` to coll
 
 ## Notebook or individual task
 
-Use `notebooks/seasonal_observing_plan.ipynb` for an interactive seasonal plan, or `notebooks/task_api_examples.ipynb` to run selected collection and reporting tasks. Reusable task functions are grouped under `target_selection.tasks`.
+Use `notebooks/workflows/seasonal_observing_plan.ipynb` for an interactive seasonal plan, or `notebooks/tutorials/task_api_examples.ipynb` to run selected collection and reporting tasks. Reusable task functions are grouped under `target_selection.tasks`.
 
 ## Rubin reference catalog
 

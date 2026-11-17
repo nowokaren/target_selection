@@ -55,9 +55,9 @@ outputs/
 
 Repository code should use `target_selection.cache_paths` for shared locations.
 Cache keys and release fingerprints remain inside provider subdirectories when
-results depend on a query or data release. All generated products stay under this same root, grouped by run or analysis
-(e.g. `outputs/notebooks/` and `outputs/analyses/mop_dp2/`). Only reusable
-source/query data belong in `outputs/cache/`. Changing an observing window
+results depend on a query or data release. All generated products stay beneath the single root `outputs/`, grouped by run or analysis (for example, `outputs/runs/` and `outputs/analyses/mop_dp2/`). Reusable source and query data belong in `outputs/cache/`.
+
+Changing an observing window
 should not repeat a compatible coverage query.
 
 The one-time cache consolidation compared all retained variants by their

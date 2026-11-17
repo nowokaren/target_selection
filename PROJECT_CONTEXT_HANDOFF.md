@@ -4,7 +4,7 @@ Repositorio: `/home/karennowo/target_selection`.
 
 ## Estado de notebooks y documentación
 
-Las diez notebooks generales activas están en `notebooks/`; `notebooks/README.md` explica el propósito de cada una. Los análisis MOP–DP2 permanecen en `analyses/mop_dp2/notebooks/`. Dos notebooks históricas recuperadas se conservan en `archive/` y están descritas en `archive/README.md`.
+Los notebooks activos están centralizados en `notebooks/`, agrupados por `analysis/`, `tutorials/`, `visualization/` y `workflows/`; los históricos están en `notebooks/archive/`. El índice `notebooks/README.md` describe su propósito. Los productos de análisis, corridas y cachés están bajo el único directorio raíz `outputs/`.
 
 La documentación vigente se encuentra en `docs/`. `mkdocs.yml` navega las páginas actuales. Las fuentes de los diagramas están en `docs/assets/` y sus PNG/PDF en `docs/assets/diagrams/`. No hacer push ni crear tags sin aprobación explícita.
 

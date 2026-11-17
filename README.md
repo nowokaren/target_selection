@@ -4,7 +4,7 @@ This repository collects microlensing candidates and observing history, retrieve
 
 ## Current entry points
 
-- TOM and local-survey visibility workflow, with inline candidate tables and light curves: [`notebooks/tom_survey_visibility_lightcurves.ipynb`](notebooks/tom_survey_visibility_lightcurves.ipynb).
+- TOM and local-survey visibility workflow, with inline candidate tables and light curves: [`notebooks/workflows/tom_survey_visibility_lightcurves.ipynb`](notebooks/workflows/tom_survey_visibility_lightcurves.ipynb).
 
 - Seasonal planning: `target-selection-plan --start-date YYYY-MM-DD --end-date YYYY-MM-DD` or `python -m target_selection.planning_cli ...`.
 - Reproducible Rubin reference-catalog enrichment: `target-selection catalog --config configs/lastberu_dp2.toml`.
@@ -28,7 +28,7 @@ The plan uses the shared evidence-based evaluator in `target_selection.prioritiz
 
 - `target_selection/`: supported Python package and command-line tools.
 - `notebooks/`: current observing guides and scientific notebooks; see its README for their distinct purposes.
-- `analyses/mop_dp2/`: MOP–Rubin analysis notebooks and products.
+- `analyses/mop_dp2/`: MOP–DP2 study notes and its analysis environment; the notebooks are under `notebooks/analysis/mop_dp2/`.
 - `configs/`: source and Rubin run configuration.
 - `data/`: local source inputs and observing inventories.
 - `outputs/cache/`: shared reusable provider/cache data (ignored by Git).
@@ -43,7 +43,7 @@ cd target_selection
 python -m pip install -e .
 ```
 
-Open `notebooks/tom_survey_visibility_lightcurves.ipynb` in Jupyter to load TOM
+Open `notebooks/workflows/tom_survey_visibility_lightcurves.ipynb` in Jupyter to load TOM
 and local-survey candidates, apply the visibility cut, and display the visible
 target light curves. Copy `configs/local_hsh.toml` and set paths for the local
 HSH image inventory, event-coordinate catalog, and (optionally) its photometry

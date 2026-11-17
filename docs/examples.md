@@ -1,6 +1,6 @@
 # Product examples
 
-The executable walkthrough [`notebooks/task_api_examples.ipynb`](https://github.com/nowokaren/target_selection/blob/main/notebooks/task_api_examples.ipynb) demonstrates the same tasks with direct Python variables.
+The executable walkthrough [`notebooks/tutorials/task_api_examples.ipynb`](https://github.com/nowokaren/target_selection/blob/main/notebooks/tutorials/task_api_examples.ipynb) demonstrates the same tasks with direct Python variables.
 
 These deliberately synthetic examples illustrate the structure of the main
 visual products. A real run writes the corresponding files under its own

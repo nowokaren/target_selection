@@ -34,7 +34,7 @@ Use `target_io.list_sources()`, `target_io.describe_source()`, `target_io.list_a
 
 ## 5. Follow the relevant example
 
-The notebooks are independent; choose the one that matches the task. Start with `notebooks/seasonal_observing_plan.ipynb` for the complete observing workflow, `notebooks/task_api_examples.ipynb` for individual calls, or `notebooks/catalog_loading_and_selection.ipynb` for configured catalogs. The [notebook guide](usage-notebooks.md) lists the source-specific and diagnostic examples.
+The notebooks are independent; choose the one that matches the task. Start with `notebooks/workflows/seasonal_observing_plan.ipynb` for the complete observing workflow, `notebooks/tutorials/task_api_examples.ipynb` for individual calls, or `notebooks/tutorials/catalog_loading_and_selection.ipynb` for configured catalogs. The [notebook guide](usage-notebooks.md) lists the source-specific and diagnostic examples.
 
 ## 6. Read the implementation behind each operation
 

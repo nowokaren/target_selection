@@ -24,7 +24,7 @@ target_io.describe_adapter()
 
 A new catalog format needs an adapter with a `load(definition, *, filters=None, verbose=True)` method returning the canonical target table. Register it with `target_io.register_adapter`, then add a source definition under `configs/sources/` that selects the adapter. The adapter should handle source access and normalization; reports and scientific selection stay in their respective modules.
 
-OGLE and OPM already have provider interfaces under `target_selection.sources` and `target_selection.data_source`. Their public access examples are in `notebooks/ogle_data_access.ipynb` and `notebooks/opm_data_access.ipynb`.
+OGLE and OPM already have provider interfaces under `target_selection.sources` and `target_selection.data_source`. Their public access examples are in `notebooks/tutorials/ogle_data_access.ipynb` and `notebooks/tutorials/opm_data_access.ipynb`.
 
 `target_io.add_data` is reserved for optional data added after loading, such as photometry or event parameters obtained from another provider.
 
